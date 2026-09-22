@@ -115,12 +115,28 @@ class RemoteShard {
   }
 
   async text(docId) {
+    if (this.externalText) {
+      const beforeRequests = this.externalText.networkRequests;
+      const beforeBytes = this.externalText.networkBytes;
+      const value = await this.externalText.text(docId);
+      this.client.networkRequests += this.externalText.networkRequests - beforeRequests;
+      this.client.networkBytes += this.externalText.networkBytes - beforeBytes;
+      return value;
+    }
     const { textOffset, textLength } = await this.offsets(docId);
     return gunzip(await this.client.getRange(this.file("text.bin"), textOffset, textLength));
   }
 
   async texts(ids, { maxGap = 4 * 1024 * 1024, maxSpan = 32 * 1024 * 1024 } = {}) {
     if (!ids.length) return new Map();
+    if (this.externalText) {
+      const beforeRequests = this.externalText.networkRequests;
+      const beforeBytes = this.externalText.networkBytes;
+      const values = await this.externalText.texts(ids);
+      this.client.networkRequests += this.externalText.networkRequests - beforeRequests;
+      this.client.networkBytes += this.externalText.networkBytes - beforeBytes;
+      return values;
+    }
     const locations = await Promise.all(ids.map(async (id) => ({ id, ...(await this.offsets(id)) })));
     locations.sort((a, b) => a.textOffset - b.textOffset);
     const groups = [];
@@ -164,9 +180,10 @@ function bitmapFor(tree, terms, optimistic) {
 
 /** Read-only, serverless Boolean search over one or more static shards. */
 export class StaticSearch {
-  constructor(manifestUrl, { fetchImpl = (...args) => globalThis.fetch(...args) } = {}) {
+  constructor(manifestUrl, { fetchImpl = (...args) => globalThis.fetch(...args), textSources = {} } = {}) {
     this.url = new URL(String(manifestUrl), globalThis.location?.href || "http://localhost/");
     this.fetchImpl = fetchImpl;
+    this.textSources = textSources;
     this.networkRequests = 0;
     this.networkBytes = 0;
     this.readyPromise = null;
@@ -206,7 +223,19 @@ export class StaticSearch {
       if (root.format !== FORMAT || !Array.isArray(root.shards)) throw new Error("Unsupported root manifest");
       this.shards = await Promise.all(root.shards.map(async ({ name, url }) => {
         const shardUrl = new URL(url, this.url);
-        return new RemoteShard(name, shardUrl, await this.getJson(shardUrl), this);
+        const shard = new RemoteShard(name, shardUrl, await this.getJson(shardUrl), this);
+        const declared = shard.manifest.externalText;
+        const source = this.textSources[name] || (declared && { ...declared, mapUrl: new URL(declared.map, shardUrl) });
+        if (source) {
+          const { mapUrl, baseUrl, mode, concurrency } = source;
+          const { ParquetTextSource } = await import("./parquet_source.js");
+          const packed = await this.getBytes(new URL(mapUrl, this.url));
+          const map = JSON.parse(await gunzip(packed));
+          if (map.documentCount !== shard.manifest.documentCount) throw new Error(`Source map does not match shard ${name}`);
+          shard.externalText = new ParquetTextSource(map, new URL(baseUrl, shardUrl),
+            { fetchImpl: this.fetchImpl, mode, concurrency });
+        }
+        return shard;
       }));
       return this;
     })();
@@ -237,8 +266,9 @@ export class StaticSearch {
     this.readyPromise = null;
   }
 
-  async search(query, { limit = 50, cursor = null, exhaustive = false, includeMetadata = false } = {}) {
+  async search(query, { limit = 50, cursor = null, exhaustive = false, includeMetadata = false, verificationBatchSize = 64 } = {}) {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new RangeError("limit must be 1..1000");
+    if (!Number.isInteger(verificationBatchSize) || verificationBatchSize < 1 || verificationBatchSize > 1000) throw new RangeError("verificationBatchSize must be 1..1000");
     const started = performance.now();
     const initialRequests = this.networkRequests;
     const initialBytes = this.networkBytes;
@@ -267,7 +297,7 @@ export class StaticSearch {
         let i = shardIndex === startShard ? ids.findIndex((id) => id > after) : 0;
         if (i < 0) continue;
         while (i < ids.length) {
-          const batch = ids.slice(i, i + 64);
+          const batch = ids.slice(i, i + verificationBatchSize);
           const uncertain = hasPhrase ? batch.filter((id) => !definite.has(id)) : [];
           const texts = await shard.texts(uncertain, { maxGap: exhaustive ? 0 : 4 * 1024 * 1024 });
           verifiedTexts += uncertain.length;

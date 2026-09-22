@@ -6,14 +6,18 @@ import { fileURLToPath } from "node:url";
 
 const repo = fileURLToPath(new URL("../../", import.meta.url));
 
-export function startDemoServer({ dataDir, port = 0, delayMs = 0 } = {}) {
+export function startDemoServer({ dataDir, sourceDir = null, port = 0, delayMs = 0 } = {}) {
   if (!dataDir) throw new Error("dataDir is required");
   const dist = path.join(repo, "dist");
   const data = path.resolve(dataDir);
+  const sources = sourceDir ? path.resolve(sourceDir) : null;
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://localhost");
-    const base = url.pathname.startsWith("/data/") ? data : dist;
-    const relative = url.pathname.startsWith("/data/") ? url.pathname.slice(6) : url.pathname.slice(1);
+    const isData = url.pathname.startsWith("/data/");
+    const isSource = url.pathname.startsWith("/source/");
+    const base = isSource ? sources : isData ? data : dist;
+    if (!base) { response.writeHead(404).end(); return; }
+    const relative = isSource ? url.pathname.slice(8) : isData ? url.pathname.slice(6) : url.pathname.slice(1);
     const requested = path.resolve(base, relative || "index.html");
     if (requested !== base && !requested.startsWith(base + path.sep)) {
       response.writeHead(403).end();

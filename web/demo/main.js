@@ -2,7 +2,18 @@ import { StaticSearch } from "../src/index.js";
 
 const manifestUrl = new URLSearchParams(location.search).get("manifest") || "/data/manifest.json";
 const includeMetadata = new URLSearchParams(location.search).get("titles") === "1";
-const search = new StaticSearch(new URL(manifestUrl, location.href));
+const params = new URLSearchParams(location.search);
+const verificationBatchSize = Number(params.get("verifyBatch") || "64");
+const sourceMap = params.get("sourceMap");
+const textSources = sourceMap ? {
+  [params.get("sourceShard") || "archive"]: {
+    mapUrl: sourceMap,
+    baseUrl: params.get("sourceBase"),
+    mode: params.get("sourceMode") || "whole",
+    concurrency: Number(params.get("sourceConcurrency") || "8"),
+  },
+} : {};
+const search = new StaticSearch(new URL(manifestUrl, location.href), { textSources });
 const form = document.querySelector("#search-form");
 const input = document.querySelector("#query");
 const status = document.querySelector("#status");
@@ -22,7 +33,7 @@ async function run(append = false) {
   status.textContent = "Searching…";
   more.hidden = true;
   try {
-    const answer = await search.search(currentQuery, { limit: 50, cursor, includeMetadata });
+    const answer = await search.search(currentQuery, { limit: 50, cursor, includeMetadata, verificationBatchSize });
     for (const hit of answer.hits) {
       const li = document.createElement("li");
       const heading = document.createElement("strong");

@@ -53,3 +53,24 @@ node benchmarks/validate_counts.js /absolute/path/to/data
 ```
 
 Pass a data directory containing `manifest.json` and the referenced shard directories. For IDs-only timing, omit `--metadata`. An actual hosted end-to-end benchmark and CI runtime/limits test are intentionally deferred until productionization is approved.
+
+## Source-backed phrase verification (follow-up)
+
+The original EUR-LEX Parquet files already contain the text, so duplicating it is **not necessary** when source files remain accessible at an immutable revision. A sorted-file/row locator for this full snapshot is only **152,762 bytes gzipped** (13,545 nonempty Parquet files). Keeping the other full-corpus files unchanged and omitting `text.bin` projects a **567,752,562-byte** static search artifact (about 542 MiB), down from 3.00 GiB. This is a storage calculation using the measured files; the complete archive was not rebuilt in the new mode. A 6,507-document 1996 shard **was** built in both modes: external source took 4.82 s and 13 MiB on disk (`text.bin` empty, source map 3,010 bytes), versus 5.59 s and 47 MiB bundled (34,652,636-byte `text.bin`). These are laptop timings, not GitHub CI timings.
+
+Direct browser fetch and Zstandard decoding worked against an actual revision-pinned Hugging Face Parquet URL. For the phrase-only first page, 128 bundled source texts were compared byte-for-byte with texts fetched from 82 Hugging Face Parquet files; **all 128 matched**. The source URL revision used for this check was `4c51d3968f5914322a229509d40921295c4c9e58`. Production indexing must pin the same revision as the files used to build the index.
+
+The next table uses the same real-Chrome/local-server simulation as above (600 ms per response, 10 MiB/s downlink), stopping when 50 IDs are rendered. `whole` fetches each selected source Parquet file once and decodes its text column; `range` asks for the Parquet text-column ranges. The original bundled mode uses 64-candidate batches.
+
+| Phrase-only `"greenhouse gas"` strategy | Batch | Submit-to-50 IDs | Requests | Transfer |
+| --- | ---: | ---: | ---: | ---: |
+| Bundled compressed texts | 64 | 17.9 s | 20 | 116.7 MB |
+| External Parquet, range reads | 64 | 22.4 s | 170 | 52.3 MB |
+| External Parquet, whole files | 64 | 13.6 s | 87 | 45.5 MB |
+| External Parquet, whole files | 32 | 11.9 s | 68 | 37.2 MB |
+| External Parquet, whole files | **96** | **10.9 s** | **67** | **36.1 MB** |
+| External Parquet, whole files | 128 | 13.4 s | 87 | 45.5 MB |
+
+With titles, external whole-file mode at batch 64 took 16.4 s versus 19.3 s bundled. The four mixed/word-heavy queries above had essentially unchanged first-page timings in external mode because their first 50 hits did not require phrase verification. Page initialization under the simulation took 3.73 s external versus 2.48 s bundled; despite that extra source-map/decoder load, phrase-only **page-open-to-50-IDs** fell from about 20.3 s to 14.7 s with the 96-candidate batch.
+
+In two real Hugging Face fetch runs with the index served locally (not hosted on Hugging Face), phrase-only external whole-file verification took 10.5 s for 50 IDs at batch 64 and 6.3 s for 50 IDs plus titles at batch 96. CDN/browser caches and network conditions varied, so these are feasibility observations, not a guaranteed production SLA. The full lean index has not yet been deployed or benchmarked from the intended public host, and GitHub CI has not been tested.

@@ -20,11 +20,21 @@ uv run roaring-static-search build \
   --id-field celex --text-field text \
   --metadata-fields title date url
 
+# If the original Parquet files remain publicly readable, avoid copying text.
+# The source URL must be pinned to the same immutable dataset revision.
+uv run roaring-static-search build \
+  --parquet-glob '/absolute/path/to/dataset/files/2026/*.parquet' \
+  --out site/data/2026 \
+  --id-field celex --text-field text --metadata-fields title date url \
+  --external-parquet-text \
+  --source-root /absolute/path/to/dataset \
+  --source-base-url 'https://huggingface.co/datasets/OWNER/DATASET/resolve/COMMIT_SHA/'
+
 uv run roaring-static-search manifest --out site/data/manifest.json \
   archive=archive/shard.json year2026=2026/shard.json
 ```
 
-Each shard has its own document IDs (0, 1, …); shard order in the root manifest determines result order. To update one year, build that year's shard from its current source files and replace only that shard. Publish immutable/revision-pinned shard URLs and the updated root manifest **last**, so in-flight HTTP Range reads cannot mix index versions. At a year boundary, update both years while your data pipeline can still change prior-year documents.
+Each shard has its own document IDs (0, 1, …); shard order in the root manifest determines result order. To update one year, build that year's shard from its current source files and replace only that shard. Publish immutable/revision-pinned shard URLs and the updated root manifest **last**, so in-flight HTTP Range reads cannot mix index versions. For external text, pin the Parquet source URL to the **same source snapshot used during indexing**, since row numbers can change. At a year boundary, update both years while your data pipeline can still change prior-year documents.
 The CLI builds into a temporary sibling directory and moves the complete shard into place only after success; it refuses to overwrite an existing output.
 
 ## Search in a browser
@@ -55,13 +65,13 @@ const fullDocument = await search.getDocument(page.hits[0], { includeText: true 
 
 By default, `search()` returns IDs quickly. Pass `{ includeMetadata: true }` for titles/other stored fields, or fetch a particular hit with `getDocument(hit, { includeText: true })`. Metadata hydration can take additional HTTP ranges, so it is excluded from the default first-ID timing.
 
-The page has **exact first-page results**: if a quoted phrase yields false-positive bitmap candidates, it fetches and checks further documents until the requested page fills or candidates run out. Bitmap `candidateCount` is not an exact phrase-hit count. `exactCount` is exact immediately for word-only queries; for phrase queries, use `exhaustive: true` at potentially substantial I/O cost. Results are ordered by manifest shard, then local document ID. Duplicate external IDs are not collapsed.
+The page has **exact first-page results**: if a quoted phrase yields false-positive bitmap candidates, it fetches and checks further documents until the requested page fills or candidates run out. Bitmap `candidateCount` is not an exact phrase-hit count. `exactCount` is exact immediately for word-only queries; for phrase queries, use `exhaustive: true` at potentially substantial I/O cost. Results are ordered by manifest shard, then local document ID. Duplicate external IDs are not collapsed. `search()` accepts `verificationBatchSize` (default 64); a larger batch makes fewer network rounds but can over-fetch source documents.
 
 ## Files and operational trade-offs
 
-Each shard contains 256 SHA-256-bucketed JSON lexicon files, `postings.bin` (concatenated portable Roaring bitmaps), `ids.json.gz` (compact external-ID table), `docs.idx` (fixed-width offsets), `meta.bin` (JSON metadata), and `text.bin` (individually gzip-compressed **full** texts). The browser fetches term buckets and postings in parallel, then the ID table; phrase-only candidates additionally fetch compressed full texts. A host must support HTTP `Range` requests with `206` and `Content-Range`, plus CORS for a different page origin. The reader fails closed if a host ignores Range.
+Each shard contains 256 SHA-256-bucketed JSON lexicon files, `postings.bin` (concatenated portable Roaring bitmaps), `ids.json.gz` (compact external-ID table), `docs.idx` (fixed-width offsets), and `meta.bin` (JSON metadata). By default, `text.bin` contains individually gzip-compressed **full** texts. With `--external-parquet-text`, `text.bin` is empty and a small `sources.json.gz` maps document IDs to original Parquet file/row locations. The browser fetches and decodes only the necessary source files for phrase verification. A host must support HTTP `Range` requests with `206` and `Content-Range` for the index, plus CORS for a different page origin. The reader fails closed if a host ignores Range.
 
-The document store deliberately duplicates source text to enable independent, exact phrase verification. It may dwarf the bitmap index. Network work is *not* guaranteed to be 2–3 requests: 10 query terms across two shards can require dozens of parallel requests, and phrase verification can require one full-text fetch per uncertain candidate. Size, latency, and update time depend on the corpus and host; measure them before production use.
+The default document store duplicates source text to enable independent, exact phrase verification. External Parquet mode removes that duplication but depends on stable, public, browser-readable source files. It currently downloads each selected Parquet file whole because EUR-LEX's small, Zstandard-compressed daily files required fewer requests and bytes than range-reading their text columns in our benchmark. Network work is *not* guaranteed to be 2–3 requests: 10 query terms across two shards can require dozens of parallel requests, and phrase verification can touch many source files. Size, latency, and update time depend on the corpus and host; measure them before production use.
 
 ## Test
 

@@ -19,6 +19,14 @@ try {
   execFileSync("uv", ["run", "roaring-static-search", "manifest", "--out", path.join(dataDir, "manifest.json"), "archive=archive/shard.json", "current=current/shard.json"], { cwd: root });
   execFileSync("npm", ["run", "build:demo"], { cwd: root });
   server = await startDemoServer({ dataDir });
+  const sourceFile = path.join(dataDir, "source/files/example.parquet");
+  execFileSync("uv", ["run", "--extra", "parquet", "python", "tests/create_parquet_fixture.py", sourceFile], { cwd: root });
+  execFileSync("uv", ["run", "--extra", "parquet", "roaring-static-search", "build", "--parquet-glob", sourceFile,
+    "--out", path.join(dataDir, "external"), "--id-field", "celex", "--metadata-fields", "title",
+    "--external-parquet-text", "--source-root", path.join(dataDir, "source"),
+    "--source-base-url", `http://127.0.0.1:${server.address().port}/data/source/`], { cwd: root });
+  execFileSync("uv", ["run", "roaring-static-search", "manifest", "--out", path.join(dataDir, "external/manifest.json"),
+    "external=shard.json"], { cwd: root });
   browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
   const page = await browser.newPage();
   const errors = [];
@@ -34,8 +42,14 @@ try {
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.includes("bitmap candidates"));
   assert.deepEqual(await page.locator("#results li strong").allTextContents(), ["A", "F", "H"]);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?manifest=/data/external/manifest.json`);
+  await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
+  await page.locator("#query").fill('"greenhouse gas"');
+  await page.locator("#search-form button").click();
+  await page.waitForFunction(() => document.querySelector("#status").textContent.includes("bitmap candidates"));
+  assert.deepEqual(await page.locator("#results li strong").allTextContents(), ["P1"]);
   assert.deepEqual(errors, []);
-  console.log("Chrome browser smoke test passed: exact nested query and phrase verification");
+  console.log("Chrome browser smoke test passed: Boolean query, bundled and external Parquet phrase verification");
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));

@@ -106,3 +106,23 @@ test("exhaustive Boolean results agree with a full-text scan", async () => {
     assert.equal(actual.exactCount, expected.length, query);
   }
 });
+
+test("external Parquet text verifies phrases without a duplicate text store", async () => {
+  const sourceFile = path.join(temp, "source/files/example.parquet");
+  execFileSync("uv", ["run", "--extra", "parquet", "python", "tests/create_parquet_fixture.py", sourceFile], { cwd: root });
+  const target = path.join(temp, "external");
+  execFileSync("uv", ["run", "--extra", "parquet", "roaring-static-search", "build",
+    "--parquet-glob", sourceFile, "--out", target, "--id-field", "celex",
+    "--metadata-fields", "title", "--external-parquet-text", "--source-root", path.join(temp, "source"),
+    "--source-base-url", `${origin}/source/`], { cwd: root });
+  execFileSync("uv", ["run", "roaring-static-search", "manifest", "--out", path.join(target, "manifest.json"),
+    "external=shard.json"], { cwd: root });
+  assert.equal((await readFile(path.join(target, "text.bin"))).length, 0);
+  const external = new StaticSearch(`${origin}/external/manifest.json`);
+  const page = await external.search('"greenhouse gas"', { includeMetadata: true });
+  assert.deepEqual(page.hits.map((hit) => hit.id), ["P1"]);
+  assert.equal(page.candidateCount, 2);
+  assert.equal(page.hits[0].title, "Exact phrase");
+  assert.equal((await external.getDocument(page.hits[0], { includeText: true })).text, "Copernicus and greenhouse gas");
+  await external.close();
+});

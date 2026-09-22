@@ -68,6 +68,31 @@ def parquet_records(paths: Iterable[Path], columns: list[str]) -> Iterator[dict[
                 yield {column: data[column][row] for column in selected}
 
 
+def build_parquet_source_map(paths: Iterable[Path], source_root: Path, output: Path, document_count: int) -> dict[str, int]:
+    """Write a compact file/row locator for the exact Parquet input order."""
+    import pyarrow.parquet as pq
+
+    root = source_root.resolve()
+    files: list[list[Any]] = []
+    count = 0
+    for path in paths:
+        path = path.resolve()
+        relative = path.relative_to(root).as_posix()
+        rows = pq.ParquetFile(path).metadata.num_rows
+        if rows:
+            files.append([count, rows, relative, path.stat().st_size])
+            count += rows
+    if count != document_count:
+        raise ValueError(f"Source rows {count} != indexed documents {document_count}")
+    payload = json.dumps({"format": "roaring-parquet-source/v1", "documentCount": count,
+                          "files": files}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    with output.open("wb") as raw:
+        with gzip.GzipFile(filename="", fileobj=raw, mode="wb", mtime=0, compresslevel=9) as packed:
+            packed.write(payload)
+    return {"documents": count, "nonemptyFiles": len(files), "jsonBytes": len(payload),
+            "gzipBytes": output.stat().st_size}
+
+
 def build_shard(
     records: Iterable[Mapping[str, Any]],
     output: Path,
@@ -77,6 +102,7 @@ def build_shard(
     metadata_fields: list[str] | None = None,
     gzip_level: int = 1,
     max_documents: int | None = None,
+    store_text: bool = True,
 ) -> dict[str, Any]:
     if output.exists():
         raise FileExistsError(f"Refusing to overwrite {output}")
@@ -110,7 +136,7 @@ def build_shard(
                     meta[field] = record[field]
             meta_bytes = json.dumps(meta, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
             text_bytes = body.encode("utf-8")
-            packed_text = gzip.compress(text_bytes, compresslevel=gzip_level, mtime=0)
+            packed_text = gzip.compress(text_bytes, compresslevel=gzip_level, mtime=0) if store_text else b""
             meta_offset = meta_file.tell()
             text_offset = text_file.tell()
             meta_file.write(meta_bytes)

@@ -4,7 +4,11 @@
   "type": "module",
   "description": "Browser reader for static Roaring search indexes",
   "exports": "./web/src/index.js",
-  "files": ["web/src/", "README.md", "LICENSE"],
+  "files": [
+    "web/src/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "test": "node --test web/test/*.test.js",
     "test:browser": "node web/test/browser_smoke.js",
@@ -14,6 +18,8 @@
     "serve:demo": "node web/demo/server.js"
   },
   "dependencies": {
+    "hyparquet": "^1.31.1",
+    "hyparquet-compressors": "^1.1.2",
     "roaring-wasm": "^1.1.0"
   },
   "devDependencies": {
