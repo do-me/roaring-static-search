@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roaring Static Search Demo</title>
+  <style>
+    body { font: 16px/1.5 system-ui, sans-serif; max-width: 900px; margin: 3rem auto; padding: 0 1rem; }
+    form { display: flex; gap: .5rem; }
+    input { flex: 1; font: inherit; padding: .5rem; }
+    button { font: inherit; padding: .5rem 1rem; }
+    li { margin: .7rem 0; overflow-wrap: anywhere; }
+    small { color: #555; }
+    code { background: #eee; padding: .1rem .3rem; }
+  </style>
+</head>
+<body>
+  <h1>Roaring Static Search</h1>
+  <p>Exact terms, AND, OR, parentheses, and quoted adjacent-token phrases. Try <code>copernicus AND (climate OR "greenhouse gas")</code>.</p>
+  <form id="search-form"><input id="query" value="copernicus AND (climate OR &quot;greenhouse gas&quot;)" aria-label="Search query"><button>Search</button></form>
+  <p id="status">Loading…</p>
+  <ol id="results"></ol>
+  <button id="more" hidden>More results</button>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

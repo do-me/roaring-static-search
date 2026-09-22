@@ -1,0 +1,23 @@
+{
+  "name": "roaring-static-search",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser reader for static Roaring search indexes",
+  "exports": "./web/src/index.js",
+  "files": ["web/src/", "README.md", "LICENSE"],
+  "scripts": {
+    "test": "node --test web/test/*.test.js",
+    "test:browser": "node web/test/browser_smoke.js",
+    "benchmark:browser": "node benchmarks/browser_queries.js",
+    "build:demo": "vite build --config web/vite.config.js",
+    "dev": "vite --config web/vite.config.js",
+    "serve:demo": "node web/demo/server.js"
+  },
+  "dependencies": {
+    "roaring-wasm": "^1.1.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.58.0",
+    "vite": "^7.1.0"
+  }
+}

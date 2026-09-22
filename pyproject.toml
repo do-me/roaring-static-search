@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "roaring-static-search"
+version = "0.1.0"
+description = "Build portable Roaring inverted indexes for static, serverless search"
+requires-python = ">=3.10"
+dependencies = ["pyroaring>=1.0,<2", "regex>=2024.0"]
+
+[project.optional-dependencies]
+parquet = ["pyarrow>=17"]
+test = ["pytest>=8"]
+
+[project.scripts]
+roaring-static-search = "roaring_static_search.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/roaring_static_search"]
