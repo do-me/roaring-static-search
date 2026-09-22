@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,6 +21,11 @@ before(async () => {
     execFileSync("uv", ["run", "roaring-static-search", "build", "--jsonl", path.join(root, "tests/fixtures", `${shard}.jsonl`), "--out", path.join(temp, shard), "--metadata-fields", "title"], { cwd: root });
   }
   execFileSync("uv", ["run", "roaring-static-search", "manifest", "--out", path.join(temp, "manifest.json"), "archive=archive/shard.json", "current=current/shard.json"], { cwd: root });
+  const manifestPath = path.join(temp, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  Object.assign(manifest.shards[0], { yearStart: 2020, yearEnd: 2020 });
+  Object.assign(manifest.shards[1], { yearStart: 2026, yearEnd: 2026 });
+  await writeFile(manifestPath, JSON.stringify(manifest));
   server = createServer(async (request, response) => {
     const requested = path.join(temp, decodeURIComponent(new URL(request.url, "http://localhost").pathname));
     if (!requested.startsWith(temp + path.sep)) { response.writeHead(403).end(); return; }
@@ -86,6 +91,17 @@ test("phrase false positives are skipped without losing pagination", async () =>
 test("Unicode tokens and mixed Boolean query", async () => {
   const answer = await search.search('café OR co2');
   assert.deepEqual(answer.hits.map((hit) => hit.id), ["C", "G"]);
+});
+
+test("year bounds skip unrelated shards and unlimited search returns every hit", async () => {
+  const filtered = new StaticSearch(`${origin}/manifest.json`);
+  assert.deepEqual(await filtered.yearBounds(), { min: 2020, max: 2026 });
+  const answer = await filtered.search("climate", { yearFrom: 2026, yearTo: 2026, limit: null });
+  assert.deepEqual(answer.hits.map((hit) => [hit.id, hit.year]), [["G", 2026], ["H", 2026]]);
+  assert.equal(answer.exactCount, 2);
+  assert.equal(filtered.shards[0], undefined, "the 2020 shard must not be loaded");
+  assert.ok(filtered.shards[1], "the selected 2026 shard is loaded");
+  await filtered.close();
 });
 
 test("exhaustive Boolean results agree with a full-text scan", async () => {

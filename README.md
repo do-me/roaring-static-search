@@ -54,6 +54,8 @@ import { StaticSearch } from "roaring-static-search";
 const search = new StaticSearch("https://static.example/data/manifest.json");
 const page = await search.search('copernicus AND (climate OR "greenhouse gas")', {
   limit: 50,
+  yearFrom: 2015,
+  yearTo: 2026,
 });
 console.log(page.hits, page.nextCursor, page.exactCount);
 const fullDocument = await search.getDocument(page.hits[0], { includeText: true });
@@ -62,13 +64,16 @@ const sourceRows = await search.getSourceRows(page.hits, {
 });
 // For a quoted-phrase query, exactCount is null unless you request
 // { exhaustive: true }, which can require downloading many full texts.
+// Use { limit: null } to return every exact match; this implies exhaustive.
 ```
 
 `AND` binds tighter than `OR`; parentheses and quoted adjacent-token phrases are supported. An unquoted word is a whole token, case-insensitive. The writer and reader lowercase and split on characters outside Unicode letter/number/private-use categories, approximating SQLite FTS5's `unicode61` tokenizer. Thus `"greenhouse gas"` also matches `greenhouse-gas`, and `climate` matches `climate_change`. `NOT`, stemming, diacritic folding, compatibility normalization (e.g. `CO₂` → `co2`), fuzzy matches, implicit AND, and global relevance ranking are not implemented.
 
 By default, `search()` returns IDs quickly. Pass `{ includeMetadata: true }` for index-stored fields, fetch one hit with `getDocument(hit, { includeText: true })`, or use `getSourceRows(hits, { columns })` to retrieve arbitrary fields from source-backed Parquet. Metadata hydration can take additional requests, so it is excluded from the default first-ID timing. The deployed Hightable UI deliberately searches IDs first, then hydrates all columns for only its virtualized viewport rows.
 
-The page has **exact first-page results**: if a quoted phrase yields false-positive bitmap candidates, it fetches and checks further documents until the requested page fills or candidates run out. Bitmap `candidateCount` is not an exact phrase-hit count. `exactCount` is exact immediately for word-only queries; for phrase queries, use `exhaustive: true` at potentially substantial I/O cost. Results are ordered by manifest shard, then local document ID. Duplicate external IDs are not collapsed. `search()` accepts `verificationBatchSize` (default 64); a larger batch makes fewer network rounds but can over-fetch source documents.
+The page has **exact first-page results**: if a quoted phrase yields false-positive bitmap candidates, it fetches and checks further documents until the requested page fills or candidates run out. Bitmap `candidateCount` is not an exact phrase-hit count. `exactCount` is exact immediately for word-only queries; for phrase queries, use `exhaustive: true` at potentially substantial I/O cost. Passing `limit: null` returns all exact matches and implies exhaustive phrase verification. Results are ordered by manifest shard, then local document ID. Duplicate external IDs are not collapsed by the library; the demo's search-all view can collapse them by external ID. `search()` accepts `verificationBatchSize` (default 64); a larger batch makes fewer network rounds but can over-fetch source documents.
+
+`yearFrom` and `yearTo` are inclusive. For early shard pruning, add `yearStart` and `yearEnd` to each entry in the root manifest. With external Parquet source maps, document IDs are also filtered to exact source years before phrase verification or result hydration. EUR-LEX uses immutable five-year historical shards plus one replaceable shard per recent year, balancing fewer HTTP requests against useful year pruning.
 
 ## Files and operational trade-offs
 

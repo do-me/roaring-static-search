@@ -23,10 +23,12 @@
     "roaring-wasm": "^1.1.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "hightable": "^0.26.4",
     "playwright-core": "^1.58.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.3",
     "vite": "^7.1.0"
   }
 }

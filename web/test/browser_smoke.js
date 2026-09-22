@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,11 @@ try {
     execFileSync("uv", ["run", "roaring-static-search", "build", "--jsonl", path.join(root, "tests/fixtures", `${shard}.jsonl`), "--out", path.join(dataDir, shard), "--metadata-fields", "title"], { cwd: root });
   }
   execFileSync("uv", ["run", "roaring-static-search", "manifest", "--out", path.join(dataDir, "manifest.json"), "archive=archive/shard.json", "current=current/shard.json"], { cwd: root });
+  const manifestPath = path.join(dataDir, "manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  Object.assign(manifest.shards[0], { yearStart: 2020, yearEnd: 2020 });
+  Object.assign(manifest.shards[1], { yearStart: 2026, yearEnd: 2026 });
+  await writeFile(manifestPath, JSON.stringify(manifest));
   execFileSync("npm", ["run", "build:demo"], { cwd: root });
   server = await startDemoServer({ dataDir });
   const sourceFile = path.join(dataDir, "source/files/example.parquet");
@@ -42,6 +47,16 @@ try {
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.includes("bitmap candidates"));
   assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["A", "F", "H"]);
+  await page.locator("#query").fill("climate");
+  await page.locator("#year-from").fill("2026");
+  await page.locator("#year-to").fill("2026");
+  await page.locator("#search-all").check();
+  assert.equal(await page.locator("#deduplicate").isChecked(), true);
+  await page.locator("#search-form button").click();
+  await page.waitForFunction(() => document.querySelector("#status").textContent.includes("2 shown"));
+  assert.equal(await page.locator("#timeline-title").textContent(), "Matches by year");
+  await page.waitForFunction(() => [...document.querySelectorAll('#results td[aria-colindex="3"]')].map((cell) => cell.textContent).join(",") === "G,H");
+  assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["G", "H"]);
   await page.goto(`http://127.0.0.1:${server.address().port}/?manifest=/data/external/manifest.json`);
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
   await page.locator("#query").fill('"greenhouse gas"');
@@ -50,8 +65,12 @@ try {
   assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["P1"]);
   await page.waitForFunction(() => document.querySelector("#hydration-status").textContent.includes("requests"));
   assert.equal(await page.locator('#results td[aria-colindex="5"]').first().textContent(), "Exact phrase");
-  assert.deepEqual(errors, []);
-  console.log("Chrome browser smoke test passed: Boolean query, bundled and external Parquet phrase verification");
+  await page.goto(`http://127.0.0.1:${server.address().port}/?manifest=/data/missing.json`);
+  await page.getByRole("alert").waitFor();
+  assert.match(await page.getByRole("alert").textContent(), /HTTP 404/);
+  assert.equal(await page.getByRole("button", { name: "Retry" }).isVisible(), true);
+  assert.deepEqual(errors.filter((message) => !message.includes("/data/missing.json")), []);
+  console.log("Chrome browser smoke test passed: year filter, search-all chart, errors, and Parquet hydration");
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));
