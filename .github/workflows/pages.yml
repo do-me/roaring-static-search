@@ -33,6 +33,7 @@ jobs:
           GITHUB_PAGES: 'true'
           VITE_SEARCH_MANIFEST_URL: 'https://huggingface.co/datasets/do-me/EUR-LEX/resolve/search-index/search/roaring/v1/manifest.json'
           VITE_SEARCH_SHOW_TITLES: 'true'
+          VITE_SEARCH_VERIFICATION_BATCH_SIZE: '96'
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:

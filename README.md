@@ -2,7 +2,7 @@
 
 Exact Boolean keyword search from a static web page, with no search server. A Python writer turns JSONL or Parquet documents into portable Roaring postings; a small JavaScript/WASM reader fetches only relevant static byte ranges. Quoted phrases use a second stage: candidate documents are checked against their **full text** before appearing in results.
 
-The [experimental EUR-LEX search page](https://do-me.github.io/roaring-static-search/) is deployed from this repository. Its index is a separate `search-index` branch of the EUR-LEX Hugging Face repository; source data and the normal dataset publishing job remain independent.
+The [experimental EUR-LEX search page](https://do-me.github.io/roaring-static-search/) is deployed from this repository. Its index is a separate `search-index` branch of the EUR-LEX Hugging Face repository; source data and the normal dataset publishing job remain independent. The deployed page uses a phrase-verification batch of 96, the best observed value in the EUR-LEX feasibility benchmark; generic library users retain the conservative default of 64.
 
 ## Build an index
 

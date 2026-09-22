@@ -3,7 +3,7 @@ import { StaticSearch } from "../src/index.js";
 const params = new URLSearchParams(location.search);
 const manifestUrl = params.get("manifest") || import.meta.env.VITE_SEARCH_MANIFEST_URL || "/data/manifest.json";
 const includeMetadata = params.has("titles") ? params.get("titles") === "1" : import.meta.env.VITE_SEARCH_SHOW_TITLES === "true";
-const verificationBatchSize = Number(params.get("verifyBatch") || "64");
+const verificationBatchSize = Number(params.get("verifyBatch") || import.meta.env.VITE_SEARCH_VERIFICATION_BATCH_SIZE || "64");
 const sourceMap = params.get("sourceMap");
 const textSources = sourceMap ? {
   [params.get("sourceShard") || "archive"]: {
