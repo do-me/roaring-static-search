@@ -124,5 +124,16 @@ test("external Parquet text verifies phrases without a duplicate text store", as
   assert.equal(page.candidateCount, 2);
   assert.equal(page.hits[0].title, "Exact phrase");
   assert.equal((await external.getDocument(page.hits[0], { includeText: true })).text, "Copernicus and greenhouse gas");
+  const sourceRows = await external.getSourceRows(page.hits, {
+    columns: ["celex", "url", "institutions", "eurovoc_concepts", "text"],
+  });
+  assert.deepEqual(sourceRows.rows, [{
+    celex: "P1",
+    url: "https://example.test/p1",
+    institutions: ["European Commission"],
+    eurovoc_concepts: ["climate change"],
+    text: "Copernicus and greenhouse gas",
+  }]);
+  assert.ok(sourceRows.networkRequests <= 1, "whole-file source should be cached after phrase verification");
   await external.close();
 });

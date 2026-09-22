@@ -73,4 +73,17 @@ The next table uses the same real-Chrome/local-server simulation as above (600 m
 
 With titles, external whole-file mode at batch 64 took 16.4 s versus 19.3 s bundled. The four mixed/word-heavy queries above had essentially unchanged first-page timings in external mode because their first 50 hits did not require phrase verification. Page initialization under the simulation took 3.73 s external versus 2.48 s bundled; despite that extra source-map/decoder load, phrase-only **page-open-to-50-IDs** fell from about 20.3 s to 14.7 s with the 96-candidate batch.
 
-In two real Hugging Face fetch runs with the index served locally (not hosted on Hugging Face), phrase-only external whole-file verification took 10.5 s for 50 IDs at batch 64 and 6.3 s for 50 IDs plus titles at batch 96. CDN/browser caches and network conditions varied, so these are feasibility observations, not a guaranteed production SLA. The full lean index has not yet been deployed or benchmarked from the intended public host, and GitHub CI has not been tested.
+In two real Hugging Face fetch runs with the index served locally (not hosted on Hugging Face), phrase-only external whole-file verification took 10.5 s for 50 IDs at batch 64 and 6.3 s for 50 IDs plus titles at batch 96. CDN/browser caches and network conditions varied, so these are feasibility observations, not a guaranteed production SLA. At that stage, the full lean index had not yet been deployed or tested in GitHub CI.
+
+## Hosted Hightable follow-up
+
+The full textless index was subsequently deployed to the dataset's `search-index` branch. It contains 330,209 documents in a 550 MiB static artifact; the separate GitHub Actions bootstrap completed in 18m22s and an unchanged weekly update completed as a 10-second no-op. The GitHub Page now uses Hightable and searches IDs first, then loads all 14 source columns for only the virtualized viewport rows. The measurements below used fresh browser contexts, a 1600×1000 viewport, the live Hugging Face index/source files, and no artificial throttling.
+
+| Query | First 50 IDs | Visible rows with all 14 columns | Source-column transfer |
+| --- | ---: | ---: | ---: |
+| `copernicus AND climate` | 1.85 s | 3.68 s | 11 requests / 9.25 MB |
+| `climate OR atmosphere OR "greenhouse gas" OR CO2` | 2.30 s | 4.32 s | 17 requests / 5.28 MB |
+| Ten-way OR including `"greenhouse gas"` | 3.13 s | 4.32 s | 12 requests / 3.25 MB |
+| `"greenhouse gas"` | 6.69 s | 7.51 s | 0 additional requests / 0 MB |
+
+The phrase-only table needed no additional column transfer because phrase verification had already fetched and cached the relevant whole Parquet files. Timings vary with CDN cache and connection conditions; they demonstrate the deployed path rather than a guaranteed SLA.

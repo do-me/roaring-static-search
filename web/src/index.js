@@ -159,6 +159,26 @@ class RemoteShard {
     }));
     return found;
   }
+
+  async sourceRecords(ids, columns) {
+    if (this.externalText) {
+      const beforeRequests = this.externalText.networkRequests;
+      const beforeBytes = this.externalText.networkBytes;
+      const values = await this.externalText.records(ids, columns);
+      this.client.networkRequests += this.externalText.networkRequests - beforeRequests;
+      this.client.networkBytes += this.externalText.networkBytes - beforeBytes;
+      return values;
+    }
+    const metadata = await this.metadata(ids);
+    const texts = columns.includes("text") ? await this.texts(ids) : new Map();
+    return new Map(ids.map((id) => {
+      const stored = metadata.get(id);
+      return [id, Object.fromEntries(columns.map((column) => [
+        column,
+        column === "text" ? texts.get(id) : stored?.[column] ?? null,
+      ]))];
+    }));
+  }
 }
 
 function bitmapFor(tree, terms, optimistic) {
@@ -252,6 +272,39 @@ export class StaticSearch {
       ...(includeText ? { text: await shard.text(docId) } : {}) };
   }
 
+  /** Fetch arbitrary source columns for result hits, preserving hit order. */
+  async getSourceRows(hits, { columns } = {}) {
+    if (!Array.isArray(hits) || !Array.isArray(columns) || !columns.length) {
+      throw new TypeError("hits and a non-empty columns array are required");
+    }
+    await this.ready();
+    const initialRequests = this.networkRequests;
+    const initialBytes = this.networkBytes;
+    const grouped = new Map();
+    hits.forEach((hit, position) => {
+      const shard = this.shards[hit.shardIndex];
+      if (!shard || !Number.isInteger(hit.docId)) throw new RangeError("Invalid search hit");
+      if (!grouped.has(hit.shardIndex)) grouped.set(hit.shardIndex, []);
+      grouped.get(hit.shardIndex).push({ position, docId: hit.docId });
+    });
+    const rows = Array(hits.length);
+    await Promise.all([...grouped].map(async ([shardIndex, items]) => {
+      const records = await this.shards[shardIndex].sourceRecords(items.map((item) => item.docId), columns);
+      for (const { position, docId } of items) {
+        const record = records.get(docId) || {};
+        rows[position] = Object.fromEntries(columns.map((column) => [
+          column,
+          column === "celex" && record[column] == null ? hits[position].id : record[column] ?? null,
+        ]));
+      }
+    }));
+    return {
+      rows,
+      networkRequests: this.networkRequests - initialRequests,
+      networkBytes: this.networkBytes - initialBytes,
+    };
+  }
+
   /** Release cached WASM bitmaps when the reader is no longer needed. */
   async close() {
     if (!this.readyPromise) return;
@@ -261,6 +314,7 @@ export class StaticSearch {
       shard.postings.clear();
       shard.buckets.clear();
       shard.metaCache.clear();
+      shard.externalText?.clear();
     }
     this.shards = [];
     this.readyPromise = null;

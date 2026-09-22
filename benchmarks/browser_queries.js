@@ -63,7 +63,7 @@ try {
     await page.locator("#search-form button").click();
     await page.waitForFunction(() => /results in|Search failed/.test(document.querySelector("#status").textContent), null, { timeout: 120_000 });
     const status = await page.locator("#status").textContent();
-    const ids = await page.locator("#results li strong").allTextContents();
+    const ids = await page.locator('#results td[aria-colindex="3"]').allTextContents();
     console.log(JSON.stringify({ query, readyMs, wallMs: Math.round(performance.now() - started), status, hits: ids.length, firstIds: ids.slice(0, 5), ...(errors.length ? { errors } : {}) }));
     await context.close();
   }

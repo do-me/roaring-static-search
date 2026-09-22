@@ -14,6 +14,7 @@ export class ParquetTextSource {
     this.concurrency = concurrency;
     this.networkRequests = 0;
     this.networkBytes = 0;
+    this.fileBuffers = new Map();
   }
 
   locate(docId) {
@@ -46,22 +47,37 @@ export class ParquetTextSource {
     return bytes;
   }
 
-  async readFile(file, selections) {
+  wholeFile(file, url) {
+    if (!this.fileBuffers.has(file)) {
+      const pending = this.request(url).catch((error) => {
+        this.fileBuffers.delete(file);
+        throw error;
+      });
+      this.fileBuffers.set(file, pending);
+    }
+    return this.fileBuffers.get(file);
+  }
+
+  async readFile(file, selections, columns) {
     const url = new URL(file[2].split("/").map(encodeURIComponent).join("/"), this.baseUrl);
     let buffer;
-    if (this.mode === "whole") buffer = await this.request(url);
+    if (this.mode === "whole") buffer = await this.wholeFile(file, url);
     else buffer = {
       byteLength: file[3],
       slice: (start, end = file[3]) => this.request(url, start, end),
     };
     const rowStart = Math.min(...selections.map((item) => item.row));
     const rowEnd = Math.max(...selections.map((item) => item.row)) + 1;
-    const rows = await parquetReadObjects({ file: buffer, columns: ["text"], rowStart, rowEnd, compressors });
+    const rows = await parquetReadObjects({ file: buffer, columns, rowStart, rowEnd, compressors });
     if (rows.length !== rowEnd - rowStart) throw new Error("Parquet row range was incomplete");
-    return selections.map((item) => [item.id, rows[item.row - rowStart].text ?? ""]);
+    return selections.map((item) => [item.id, rows[item.row - rowStart]]);
   }
 
-  async texts(ids) {
+  async records(ids, columns) {
+    if (!Array.isArray(columns) || !columns.length || columns.some((column) => typeof column !== "string" || !column)) {
+      throw new TypeError("columns must be a non-empty array of names");
+    }
+    columns = [...new Set(columns)];
     const groups = new Map();
     for (const id of ids) {
       const { file, row } = this.locate(id);
@@ -74,12 +90,19 @@ export class ParquetTextSource {
     const workers = Array.from({ length: Math.min(this.concurrency, work.length) }, async () => {
       while (cursor < work.length) {
         const [file, selections] = work[cursor++];
-        for (const [id, text] of await this.readFile(file, selections)) found.set(id, text);
+        for (const [id, record] of await this.readFile(file, selections, columns)) found.set(id, record);
       }
     });
     await Promise.all(workers);
     return found;
   }
 
+  async texts(ids) {
+    const records = await this.records(ids, ["text"]);
+    return new Map([...records].map(([id, record]) => [id, record.text ?? ""]));
+  }
+
   async text(id) { return (await this.texts([id])).get(id); }
+
+  clear() { this.fileBuffers.clear(); }
 }

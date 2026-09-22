@@ -2,7 +2,7 @@
 
 Exact Boolean keyword search from a static web page, with no search server. A Python writer turns JSONL or Parquet documents into portable Roaring postings; a small JavaScript/WASM reader fetches only relevant static byte ranges. Quoted phrases use a second stage: candidate documents are checked against their **full text** before appearing in results.
 
-The [experimental EUR-LEX search page](https://do-me.github.io/roaring-static-search/) is deployed from this repository. Its index is a separate `search-index` branch of the EUR-LEX Hugging Face repository; source data and the normal dataset publishing job remain independent. The deployed page uses a phrase-verification batch of 96, the best observed value in the EUR-LEX feasibility benchmark; generic library users retain the conservative default of 64.
+The [experimental EUR-LEX search page](https://do-me.github.io/roaring-static-search/) is deployed from this repository. Its index is a separate `search-index` branch of the EUR-LEX Hugging Face repository; source data and the normal dataset publishing job remain independent. Search results are displayed with [Hightable](https://github.com/hyparam/hightable). Its virtualized DataFrame resolves all 14 EUR-LEX columns only for viewport rows, directly from immutable source Parquet, and caches each fetched source file in the browser tab. The deployed page uses a phrase-verification batch of 96, the best observed value in the EUR-LEX feasibility benchmark; generic library users retain the conservative default of 64.
 
 ## Build an index
 
@@ -57,13 +57,16 @@ const page = await search.search('copernicus AND (climate OR "greenhouse gas")',
 });
 console.log(page.hits, page.nextCursor, page.exactCount);
 const fullDocument = await search.getDocument(page.hits[0], { includeText: true });
+const sourceRows = await search.getSourceRows(page.hits, {
+  columns: ["celex", "title", "institutions", "eurovoc_concepts", "text"],
+});
 // For a quoted-phrase query, exactCount is null unless you request
 // { exhaustive: true }, which can require downloading many full texts.
 ```
 
 `AND` binds tighter than `OR`; parentheses and quoted adjacent-token phrases are supported. An unquoted word is a whole token, case-insensitive. The writer and reader lowercase and split on characters outside Unicode letter/number/private-use categories, approximating SQLite FTS5's `unicode61` tokenizer. Thus `"greenhouse gas"` also matches `greenhouse-gas`, and `climate` matches `climate_change`. `NOT`, stemming, diacritic folding, compatibility normalization (e.g. `CO₂` → `co2`), fuzzy matches, implicit AND, and global relevance ranking are not implemented.
 
-By default, `search()` returns IDs quickly. Pass `{ includeMetadata: true }` for titles/other stored fields, or fetch a particular hit with `getDocument(hit, { includeText: true })`. Metadata hydration can take additional HTTP ranges, so it is excluded from the default first-ID timing.
+By default, `search()` returns IDs quickly. Pass `{ includeMetadata: true }` for index-stored fields, fetch one hit with `getDocument(hit, { includeText: true })`, or use `getSourceRows(hits, { columns })` to retrieve arbitrary fields from source-backed Parquet. Metadata hydration can take additional requests, so it is excluded from the default first-ID timing. The deployed Hightable UI deliberately searches IDs first, then hydrates all columns for only its virtualized viewport rows.
 
 The page has **exact first-page results**: if a quoted phrase yields false-positive bitmap candidates, it fetches and checks further documents until the requested page fills or candidates run out. Bitmap `candidateCount` is not an exact phrase-hit count. `exactCount` is exact immediately for word-only queries; for phrase queries, use `exhaustive: true` at potentially substantial I/O cost. Results are ordered by manifest shard, then local document ID. Duplicate external IDs are not collapsed. `search()` accepts `verificationBatchSize` (default 64); a larger batch makes fewer network rounds but can over-fetch source documents.
 
@@ -71,7 +74,7 @@ The page has **exact first-page results**: if a quoted phrase yields false-posit
 
 Each shard contains 256 SHA-256-bucketed JSON lexicon files, `postings.bin` (concatenated portable Roaring bitmaps), `ids.json.gz` (compact external-ID table), `docs.idx` (fixed-width offsets), and `meta.bin` (JSON metadata). By default, `text.bin` contains individually gzip-compressed **full** texts. With `--external-parquet-text`, `text.bin` is empty and a small `sources.json.gz` maps document IDs to original Parquet file/row locations. The browser fetches and decodes only the necessary source files for phrase verification. A host must support HTTP `Range` requests with `206` and `Content-Range` for the index, plus CORS for a different page origin. The reader fails closed if a host ignores Range.
 
-The default document store duplicates source text to enable independent, exact phrase verification. External Parquet mode removes that duplication but depends on stable, public, browser-readable source files. It currently downloads each selected Parquet file whole because EUR-LEX's small, Zstandard-compressed daily files required fewer requests and bytes than range-reading their text columns in our benchmark. Network work is *not* guaranteed to be 2–3 requests: 10 query terms across two shards can require dozens of parallel requests, and phrase verification can touch many source files. Size, latency, and update time depend on the corpus and host; measure them before production use.
+The default document store duplicates source text to enable independent, exact phrase verification. External Parquet mode removes that duplication but depends on stable, public, browser-readable source files. It currently downloads each selected Parquet file whole because EUR-LEX's small, Zstandard-compressed daily files required fewer requests and bytes than range-reading their text columns in our benchmark. Whole-file buffers are reused by phrase verification and Hightable column hydration, so a phrase result already fetched from Parquet incurs no second transfer when its other columns appear. Network work is *not* guaranteed to be 2–3 requests: 10 query terms across two shards can require dozens of parallel requests, and phrase verification can touch many source files. Size, latency, and update time depend on the corpus and host; measure them before production use.
 
 ## Test
 

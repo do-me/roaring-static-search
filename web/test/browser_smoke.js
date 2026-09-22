@@ -35,19 +35,21 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
   await page.locator("#search-form button").click();
-  try { await page.locator("#results li").first().waitFor({ timeout: 5000 }); }
+  try { await page.locator('#results td[aria-colindex="3"]').first().waitFor({ timeout: 5000 }); }
   catch (error) { throw new Error(`${error.message}; status=${await page.locator("#status").textContent()}; errors=${JSON.stringify(errors)}`); }
-  assert.deepEqual(await page.locator("#results li strong").allTextContents(), ["A", "H"]);
+  assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["A", "H"]);
   await page.locator("#query").fill('"greenhouse gas"');
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.includes("bitmap candidates"));
-  assert.deepEqual(await page.locator("#results li strong").allTextContents(), ["A", "F", "H"]);
+  assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["A", "F", "H"]);
   await page.goto(`http://127.0.0.1:${server.address().port}/?manifest=/data/external/manifest.json`);
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
   await page.locator("#query").fill('"greenhouse gas"');
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.includes("bitmap candidates"));
-  assert.deepEqual(await page.locator("#results li strong").allTextContents(), ["P1"]);
+  assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["P1"]);
+  await page.waitForFunction(() => document.querySelector("#hydration-status").textContent.includes("requests"));
+  assert.equal(await page.locator('#results td[aria-colindex="5"]').first().textContent(), "Exact phrase");
   assert.deepEqual(errors, []);
   console.log("Chrome browser smoke test passed: Boolean query, bundled and external Parquet phrase verification");
 } finally {

@@ -3,25 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Experimental static Boolean full-text search over EUR-LEX">
   <title>EUR-LEX Static Search (experimental)</title>
-  <style>
-    body { font: 16px/1.5 system-ui, sans-serif; max-width: 900px; margin: 3rem auto; padding: 0 1rem; }
-    form { display: flex; gap: .5rem; }
-    input { flex: 1; font: inherit; padding: .5rem; }
-    button { font: inherit; padding: .5rem 1rem; }
-    li { margin: .7rem 0; overflow-wrap: anywhere; }
-    small { color: #555; }
-    code { background: #eee; padding: .1rem .3rem; }
-  </style>
 </head>
 <body>
-  <h1>EUR-LEX Static Search <small>(experimental)</small></h1>
-  <p>Search the <a href="https://huggingface.co/datasets/do-me/EUR-LEX">EUR-LEX dataset</a> using exact terms, AND, OR, parentheses, and quoted adjacent-token phrases. Try <code>copernicus AND (climate OR "greenhouse gas")</code>.</p>
-  <form id="search-form"><input id="query" value="copernicus AND (climate OR &quot;greenhouse gas&quot;)" aria-label="Search query"><button>Search</button></form>
-  <p id="status">Loading…</p>
-  <ol id="results"></ol>
-  <button id="more" hidden>More results</button>
-  <p><small>Runs in your browser from a <a href="https://github.com/do-me/roaring-static-search">static Roaring index</a>; phrase hits are verified against source Parquet. Results are ordered by index position, not relevance. This preview is independent of the dataset's normal weekly publishing job.</small></p>
-  <script type="module" src="./main.js"></script>
+  <div id="root"></div>
+  <noscript>This search page requires JavaScript and WebAssembly.</noscript>
+  <script type="module" src="./main.jsx"></script>
 </body>
 </html>
