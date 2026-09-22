@@ -30,17 +30,17 @@ Counts use `search(query, { exhaustive: true })`, which checks all uncertain phr
 
 Six individual term postings also matched FTS5 document frequencies and external IDs exactly. In the ten-way OR, the eight candidate-only documents were phrase false positives; there were no FTS5-only documents. This validates these queries on this snapshot, not every possible Unicode/FTS5 query.
 
-## Page-open-to-results benchmark
+## Query-submit-to-results benchmark
 
 Actual headless Google Chrome loaded the demo page and initialized the reader. Each query used a fresh browser context, then the clock started at form submission and stopped when the first 50 results were rendered. The local HTTP Range server added **600 ms per response**, and Chrome was throttled to **10 MiB/s download**. This models network cost but is not a measurement of the Hugging Face host, CORS policy, cache, or real-world connection limits.
 
 | Query | IDs only | IDs + titles |
 | --- | ---: | ---: |
-| `copernicus AND climate` | 2.66 s | 7.69 s |
-| `climate OR atmosphere OR "greenhouse gas" OR CO2` | 4.60 s | 6.68 s |
-| `copernicus AND (climate OR atmosphere OR "greenhouse gas" OR CO2)` | 5.26 s | 10.27 s |
-| Ten-way OR including `"greenhouse gas"` | 9.07 s | 11.04 s |
-| `"greenhouse gas"` alone | not rerun after text-range optimization | 19.34 s |
+| `copernicus AND climate` | 2.71 s | 7.74 s |
+| `climate OR atmosphere OR "greenhouse gas" OR CO2` | 4.65 s | 6.74 s |
+| `copernicus AND (climate OR atmosphere OR "greenhouse gas" OR CO2)` | 5.28 s | 10.33 s |
+| Ten-way OR including `"greenhouse gas"` | 9.10 s | 11.12 s |
+| `"greenhouse gas"` alone | 17.94 s | 19.31 s |
 
 The ten-way OR used `climate`, `atmosphere`, `co2`, `copernicus`, `emissions`, `energy`, `environment`, `temperature`, `satellite`, and `"greenhouse gas"`. The phrase-only titles run required 21 HTTP requests and transferred 124.7 MB because the reader coalesced scattered full-text ranges to reduce round trips. That query has almost no margin under a 20-second target; it may exceed it on the actual CDN. Mixed queries can be faster because word-only branches provide many **definite** matches that require no text fetch.
 
