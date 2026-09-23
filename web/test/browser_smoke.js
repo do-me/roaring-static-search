@@ -39,14 +39,24 @@ try {
   page.on("requestfailed", (request) => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
+  await page.getByRole("button", { name: "Dark" }).click();
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  assert.equal(await page.evaluate(() => localStorage.getItem("eur-lex-theme")), "dark");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.getByRole("button", { name: "Auto" }).click();
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+  await page.getByRole("button", { name: "Light" }).click();
+  assert.equal(await page.locator("html").getAttribute("data-theme"), "light");
   await page.locator("#search-form button").click();
   try { await page.locator('#results td[aria-colindex="3"]').first().waitFor({ timeout: 5000 }); }
   catch (error) { throw new Error(`${error.message}; status=${await page.locator("#status").textContent()}; errors=${JSON.stringify(errors)}`); }
+  await page.waitForFunction(() => [...document.querySelectorAll('#results td[aria-colindex="3"]')].map((cell) => cell.textContent).join(",") === "A,H");
   assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["A", "H"]);
   await page.locator("#prepare-analysis").click();
   try { await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("rows loaded"), null, { timeout: 20000 }); }
   catch (error) { throw new Error(`${error.message}; analysis=${await page.locator("#analysis-status").textContent()}; alerts=${JSON.stringify(await page.getByRole("alert").allTextContents())}; errors=${JSON.stringify(errors)}`); }
   await page.locator("#sql").fill("SELECT celex, title FROM search_results ORDER BY celex");
+  await page.waitForFunction(() => new URL(location.href).searchParams.get("sql") === "SELECT celex, title FROM search_results ORDER BY celex");
   await page.locator("#run-sql").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 preview rows"));
   assert.deepEqual(await page.locator('[aria-labelledby="analysis-title"] tbody td:first-child').allTextContents(), ["A", "H"]);
@@ -54,13 +64,25 @@ try {
   await page.getByRole("button", { name: "Download CSV" }).click();
   const download = await downloadPromise;
   assert.match(download.suggestedFilename(), /\.csv$/);
+  assert.match(await readFile(await download.path(), "utf8"), /celex,title[\s\S]*A/);
   await page.getByRole("button", { name: "Download Parquet" }).waitFor({ state: "visible" });
   const parquetPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download Parquet" }).click();
-  assert.match((await parquetPromise).suggestedFilename(), /\.parquet$/);
-  const excelPromise = page.waitForEvent("download", { timeout: 30000 });
+  const parquet = await parquetPromise;
+  assert.match(parquet.suggestedFilename(), /\.parquet$/);
+  const parquetBytes = await readFile(await parquet.path());
+  assert.equal(parquetBytes.subarray(0, 4).toString(), "PAR1");
+  assert.equal(parquetBytes.subarray(-4).toString(), "PAR1");
+  const excelPromise = page.waitForEvent("download", { timeout: 5000 });
   await page.getByRole("button", { name: "Download Excel" }).click();
-  assert.match((await excelPromise).suggestedFilename(), /\.xlsx$/);
+  let excel;
+  try { excel = await excelPromise; }
+  catch (error) { throw new Error(`${error.message}; analysis=${await page.locator("#analysis-status").textContent()}; alerts=${JSON.stringify(await page.getByRole("alert").allTextContents())}; errors=${JSON.stringify(errors)}`); }
+  assert.match(excel.suggestedFilename(), /\.xlsx$/);
+  const excelPath = await excel.path();
+  const excelBytes = await readFile(excelPath);
+  assert.equal(excelBytes.subarray(0, 2).toString(), "PK");
+  execFileSync("unzip", ["-t", excelPath], { stdio: "ignore" });
   await page.locator("#query").fill('"greenhouse gas"');
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("3 shown"));
@@ -75,6 +97,20 @@ try {
   assert.equal(await page.locator("#timeline-title").textContent(), "Matches by year");
   await page.waitForFunction(() => [...document.querySelectorAll('#results td[aria-colindex="3"]')].map((cell) => cell.textContent).join(",") === "G,H");
   assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["G", "H"]);
+  await page.locator("#deduplicate").uncheck();
+  await page.waitForFunction(() => {
+    const state = new URL(location.href).searchParams;
+    return state.get("q") === "climate" && state.get("from") === "2026" && state.get("to") === "2026"
+      && state.get("all") === "1" && state.get("dedupe") === "0"
+      && state.get("sql") === "SELECT celex, title FROM search_results ORDER BY celex";
+  });
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
+  assert.equal(await page.locator("#query").inputValue(), "climate");
+  assert.equal(await page.locator("#year-from").inputValue(), "2026");
+  assert.equal(await page.locator("#year-to").inputValue(), "2026");
+  assert.equal(await page.locator("#search-all").isChecked(), true);
+  assert.equal(await page.locator("#deduplicate").isChecked(), false);
   await page.goto(`http://127.0.0.1:${server.address().port}/?manifest=/data/external/manifest.json`);
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
   await page.locator("#query").fill('"greenhouse gas"');
@@ -88,7 +124,7 @@ try {
   assert.match(await page.getByRole("alert").textContent(), /HTTP 404/);
   assert.equal(await page.getByRole("button", { name: "Retry" }).isVisible(), true);
   assert.deepEqual(errors.filter((message) => !message.includes("/data/missing.json") && !message.match(/duckdb-(?:eh|mvp).*\.wasm: net::ERR_ABORTED/)), []);
-  console.log("Chrome browser smoke test passed: search, SQL analysis, CSV/Parquet/Excel exports, chart, errors, and Parquet hydration");
+  console.log("Chrome browser smoke test passed: themes, search, valid SQL exports, chart, errors, and Parquet hydration");
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));

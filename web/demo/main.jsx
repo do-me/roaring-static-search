@@ -5,7 +5,7 @@ import "hightable/src/HighTable.css";
 import "./style.css";
 
 import { StaticSearch } from "../src/index.js";
-import AnalysisPanel from "./AnalysisPanel.jsx";
+import AnalysisPanel, { DEFAULT_SQL } from "./AnalysisPanel.jsx";
 
 const COLUMNS = [
   "url", "celex", "eli", "title", "date", "lang", "institutions",
@@ -21,8 +21,23 @@ const COLUMN_CONFIGURATION = {
   eurovoc_concepts_ids: { minWidth: 260 }, text: { minWidth: 560 },
 };
 const THIS_YEAR = new Date().getFullYear();
+const DEFAULT_QUERY = 'copernicus AND (climate OR "greenhouse gas")';
+const DEFAULT_YEAR_FROM = 2015;
 
 const params = new URLSearchParams(location.search);
+function integerParam(name, fallback) {
+  if (!params.has(name)) return fallback;
+  const raw = params.get(name);
+  if (!raw?.trim()) return fallback;
+  const value = Number(raw);
+  return Number.isInteger(value) ? value : fallback;
+}
+
+function booleanParam(name, fallback) {
+  if (!params.has(name)) return fallback;
+  return !["0", "false", "off"].includes(params.get(name).toLowerCase());
+}
+
 const manifestUrl = params.get("manifest") || import.meta.env.VITE_SEARCH_MANIFEST_URL || "/data/manifest.json";
 const includeMetadata = params.has("titles") ? params.get("titles") === "1" : import.meta.env.VITE_SEARCH_SHOW_TITLES === "true";
 const verificationBatchSize = Number(params.get("verifyBatch") || import.meta.env.VITE_SEARCH_VERIFICATION_BATCH_SIZE || "64");
@@ -167,13 +182,45 @@ function Toggle({ id, checked, onChange, disabled = false, children }) {
   </label>;
 }
 
+const THEME_OPTIONS = ["light", "dark", "auto"];
+
+function useTheme() {
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = localStorage.getItem("eur-lex-theme");
+      return THEME_OPTIONS.includes(saved) ? saved : "auto";
+    } catch { return "auto"; }
+  });
+  React.useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const dark = theme === "dark" || (theme === "auto" && media.matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    };
+    apply();
+    if (theme === "auto") media.addEventListener("change", apply);
+    try { localStorage.setItem("eur-lex-theme", theme); } catch {}
+    return () => media.removeEventListener("change", apply);
+  }, [theme]);
+  return [theme, setTheme];
+}
+
+function ThemeControl({ value, onChange }) {
+  return <div className="theme-switch inline-flex border border-stone-300 bg-stone-50 p-0.5" role="group" aria-label="Colour theme">
+    {THEME_OPTIONS.map((theme) => <button key={theme} type="button" aria-pressed={value === theme} onClick={() => onChange(theme)} className="px-2.5 py-1 text-[11px] font-medium capitalize text-stone-600 transition hover:text-stone-950">{theme}</button>)}
+  </div>;
+}
+
 function App() {
-  const [query, setQuery] = useState('copernicus AND (climate OR "greenhouse gas")');
-  const [yearFrom, setYearFrom] = useState(2015);
-  const [yearTo, setYearTo] = useState(THIS_YEAR);
+  const [theme, setTheme] = useTheme();
+  const [query, setQuery] = useState(() => params.get("q") ?? DEFAULT_QUERY);
+  const [yearFrom, setYearFrom] = useState(() => integerParam("from", DEFAULT_YEAR_FROM));
+  const [yearTo, setYearTo] = useState(() => integerParam("to", THIS_YEAR));
   const [bounds, setBounds] = useState({ min: 1973, max: THIS_YEAR });
-  const [searchAll, setSearchAll] = useState(false);
-  const [deduplicate, setDeduplicate] = useState(true);
+  const [searchAll, setSearchAll] = useState(() => booleanParam("all", false));
+  const [deduplicate, setDeduplicate] = useState(() => booleanParam("dedupe", true));
+  const [sql, setSql] = useState(() => params.get("sql") ?? DEFAULT_SQL);
   const [status, setStatus] = useState("Loading index manifest…");
   const [failure, setFailure] = useState(null);
   const [cursor, setCursor] = useState(null);
@@ -200,6 +247,18 @@ function App() {
   }, []);
 
   React.useEffect(() => { newFrame(displayHits); }, [displayHits, newFrame]);
+
+  React.useEffect(() => {
+    const url = new URL(location.href);
+    url.searchParams.set("q", query);
+    url.searchParams.set("from", String(yearFrom));
+    url.searchParams.set("to", String(yearTo));
+    url.searchParams.set("all", searchAll ? "1" : "0");
+    url.searchParams.set("dedupe", deduplicate ? "1" : "0");
+    if (sql === DEFAULT_SQL) url.searchParams.delete("sql");
+    else url.searchParams.set("sql", sql);
+    history.replaceState(history.state, "", url);
+  }, [deduplicate, query, searchAll, sql, yearFrom, yearTo]);
 
   const signature = `${query.trim()}\u0000${yearFrom}\u0000${yearTo}\u0000${searchAll}`;
   const run = useCallback(async (append = false) => {
@@ -305,7 +364,7 @@ function App() {
       if (declared) {
         setBounds(declared);
         setYearFrom((value) => Math.max(declared.min, Math.min(value, declared.max)));
-        setYearTo(declared.max);
+        setYearTo((value) => Math.max(declared.min, Math.min(value, declared.max)));
       }
       setStatus("Ready");
     }, (error) => {
@@ -338,7 +397,10 @@ function App() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">EUR-LEX full-text search</h1>
         </div>
-        <a className="hidden text-sm text-stone-600 underline-offset-4 hover:text-stone-950 hover:underline sm:block" href="https://huggingface.co/datasets/do-me/EUR-LEX">View dataset ↗</a>
+        <div className="flex items-center gap-4">
+          <ThemeControl value={theme} onChange={setTheme} />
+          <a className="hidden text-sm text-stone-600 underline-offset-4 hover:text-stone-950 hover:underline sm:block" href="https://huggingface.co/datasets/do-me/EUR-LEX">View dataset ↗</a>
+        </div>
       </div>
     </header>
 
@@ -409,7 +471,7 @@ function App() {
         <pre className="mt-3 max-h-[38vh] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-stone-700">{stringify(detail.value)}</pre>
       </section>}
 
-      {rawHits.length > 0 && <AnalysisPanel epoch={analysisEpoch} prepareRows={prepareAnalysisRows} deduplicate={deduplicate} />}
+      {rawHits.length > 0 && <AnalysisPanel epoch={analysisEpoch} prepareRows={prepareAnalysisRows} deduplicate={deduplicate} sql={sql} onSqlChange={setSql} />}
     </main>
 
     <footer className="mx-auto max-w-[1800px] border-t border-stone-300 px-5 py-5 text-xs leading-5 text-stone-500 lg:px-10">Runs entirely in your browser from a <a className="text-stone-800 underline" href="https://github.com/do-me/roaring-static-search">static Roaring index</a>. Exact phrases and visible table rows resolve against immutable source Parquet. The dataset’s normal weekly publisher remains independent.</footer>

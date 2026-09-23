@@ -11,3 +11,48 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 .table-shell > div { width: 100%; }
 .table-shell [role="grid"] { font-size: .82rem; }
+
+.theme-switch button[aria-pressed="true"] { background: #1c1917; color: #fff; }
+
+[data-theme="dark"] { background: #0c0a09; }
+[data-theme="dark"] .bg-stone-50 { background-color: #0c0a09; }
+[data-theme="dark"] .bg-stone-100 { background-color: #292524; }
+[data-theme="dark"] .bg-white { background-color: #1c1917; }
+[data-theme="dark"] .bg-red-50 { background-color: #450a0a; }
+[data-theme="dark"] .bg-stone-950 { background-color: #14532d; }
+[data-theme="dark"] .text-stone-950,
+[data-theme="dark"] .text-stone-900 { color: #fafaf9; }
+[data-theme="dark"] .text-stone-800,
+[data-theme="dark"] .text-stone-700,
+[data-theme="dark"] .text-stone-600 { color: #d6d3d1; }
+[data-theme="dark"] .text-stone-500,
+[data-theme="dark"] .text-stone-400 { color: #a8a29e; }
+[data-theme="dark"] .text-red-950 { color: #fecaca; }
+[data-theme="dark"] .border-stone-300,
+[data-theme="dark"] .border-stone-400 { border-color: #57534e; }
+[data-theme="dark"] .border-stone-950 { border-color: #166534; }
+[data-theme="dark"] .border-red-700,
+[data-theme="dark"] .border-red-800 { border-color: #ef4444; }
+[data-theme="dark"] .theme-switch button[aria-pressed="true"] { background: #166534; color: #fff; }
+[data-theme="dark"] input,
+[data-theme="dark"] textarea { caret-color: #fafaf9; }
+[data-theme="dark"] section[aria-labelledby="timeline-title"] line { stroke: #57534e; }
+[data-theme="dark"] section[aria-labelledby="timeline-title"] text { fill: #d6d3d1; }
+[data-theme="dark"] [aria-labelledby="analysis-title"] tbody tr { background: #1c1917; color: #fafaf9; }
+[data-theme="dark"] .table-shell > div {
+  --hy-color-1: #fafaf9;
+  --hy-color-2: #e7e5e4;
+  --hy-color-3: #d6d3d1;
+  --hy-color-5: #78716c;
+  --hy-color-7: #57534e;
+  --hy-color-8: #44403c;
+  --hy-color-9: #292524;
+  --hy-color-10: #1c1917;
+  --hy-accent-1: #22c55e;
+  --hy-accent-2: #15803d;
+  --hy-accent-3: #14532d;
+  --hy-accent-4: #1f3d2a;
+  --hy-accent-5: #163321;
+  --hy-highlight-1: #365314;
+  --hy-highlight-2: #3f6212;
+}

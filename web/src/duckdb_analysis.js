@@ -84,7 +84,19 @@ export class BrowserAnalysis {
     await this.db.dropFile(filename).catch(() => {});
     try {
       await this.connection.query(`COPY (${expression}) TO '${filename}' (${settings.copy})`);
-      return { filename, mime: settings.mime, bytes: await this.db.copyFileToBuffer(filename) };
+      await this.db.flushFiles();
+      // copyFileToBuffer may expose storage owned by DuckDB's virtual filesystem.
+      // Keep an independent copy before the temporary file is removed.
+      let bytes = Uint8Array.from(await this.db.copyFileToBuffer(filename));
+      // DuckDB-Wasm currently prefixes XLSX output with one stray ASCII "x"
+      // (duckdb/duckdb-wasm#2119). Strip only that known prefix, then validate ZIP magic.
+      if (format === "xlsx" && bytes[0] === 0x78 && bytes[1] === 0x50 && bytes[2] === 0x4b) {
+        bytes = bytes.slice(1);
+      }
+      if (format === "xlsx" && !(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
+        throw new Error(`DuckDB produced an invalid Excel workbook (${bytes.byteLength} bytes; magic ${[...bytes.subarray(0, 8)].map((value) => value.toString(16).padStart(2, "0")).join(" ") || "empty"}).`);
+      }
+      return { filename, mime: settings.mime, bytes };
     } finally {
       await this.db.dropFile(filename).catch(() => {});
     }

@@ -6,6 +6,14 @@
   <meta name="description" content="Static Boolean full-text search and browser analytics over EUR-LEX">
   <link rel="icon" href="./favicon.svg" type="image/svg+xml">
   <title>EUR-LEX full-text search</title>
+  <script>
+    (() => {
+      let preference = "auto";
+      try { preference = localStorage.getItem("eur-lex-theme") || "auto"; } catch {}
+      const dark = preference === "dark" || (preference === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    })();
+  </script>
 </head>
 <body>
   <div id="root"></div>

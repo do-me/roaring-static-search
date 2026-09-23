@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
-const DEFAULT_SQL = `SELECT
+export const DEFAULT_SQL = `SELECT
   date_part('year', CAST(date AS DATE)) AS year,
   count(*) AS documents
 FROM search_results
@@ -23,12 +23,11 @@ function download({ bytes, filename, mime }) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export default function AnalysisPanel({ epoch, prepareRows, deduplicate }) {
+export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, onSqlChange }) {
   const engine = useRef(null);
   const activeEpoch = useRef(epoch);
   const [ready, setReady] = useState(null);
   const [status, setStatus] = useState("Load the complete exact result set into DuckDB when you are ready to analyse it.");
-  const [sql, setSql] = useState(DEFAULT_SQL);
   const [result, setResult] = useState(null);
   const [failure, setFailure] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -124,7 +123,7 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate }) {
     {ready && <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(380px,0.85fr)_minmax(0,1.15fr)]">
       <div>
         <label htmlFor="sql" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-stone-600">SQL query</label>
-        <textarea id="sql" value={sql} onChange={(event) => setSql(event.target.value)} spellCheck="false" className="h-56 w-full resize-y border border-stone-400 bg-white p-4 font-mono text-xs leading-5 outline-none focus:border-green-800 focus:ring-2 focus:ring-green-800/15" />
+        <textarea id="sql" value={sql} onChange={(event) => onSqlChange(event.target.value)} spellCheck="false" className="h-56 w-full resize-y border border-stone-400 bg-white p-4 font-mono text-xs leading-5 outline-none focus:border-green-800 focus:ring-2 focus:ring-green-800/15" />
         <div className="mt-3 flex flex-wrap gap-2">
           <button id="run-sql" type="button" disabled={busy} onClick={runSql} className="border border-stone-950 bg-stone-950 px-4 py-2 text-xs font-semibold text-white hover:bg-green-900 disabled:opacity-50">Run preview</button>
           {[["parquet", "Parquet"], ["csv", "CSV"], ["xlsx", "Excel"]].map(([format, label]) => <button key={format} type="button" disabled={busy} onClick={() => exportResult(format)} className="border border-stone-400 bg-white px-4 py-2 text-xs font-semibold hover:border-green-800 hover:text-green-800 disabled:opacity-50">Download {label}</button>)}

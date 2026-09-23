@@ -87,3 +87,22 @@ The full textless index was subsequently deployed to the dataset's `search-index
 | `"greenhouse gas"` | 6.69 s | 7.51 s | 0 additional requests / 0 MB |
 
 The phrase-only table needed no additional column transfer because phrase verification had already fetched and cached the relevant whole Parquet files. Timings vary with CDN cache and connection conditions; they demonstrate the deployed path rather than a guaranteed SLA.
+
+## Exact live-index parity audit (2026-09-23)
+
+`benchmarks/copernicus_parity.py` compared the live `copernicus` posting with a DuckDB regex scan over all 19,587 local source files. Both returned the same **1,019 physical source rows**: 899 unique nonblank external IDs and 120 rows with blank IDs. There were no live-only rows, local-only rows, duplicate nonblank IDs, or ID disagreements. The live manifest contained 330,209 documents while the local snapshot contained 330,163; none of the 46 additional live documents matched `copernicus`. The live fetch/mapping took 28.2 seconds and the local full scan 9.0 seconds in this run.
+
+## Parquet physical-layout audit (2026-09-23)
+
+All 19,587 local files report Parquet file version 1.0, were written by Polars, use Zstandard, share one schema, and contain 330,163 rows / 6,710,151,560 bytes. The median file has only 6 rows and is 80,255 bytes. The files contain 1.21 GB of serialized footers plus additional page-index/structural data. Full-text min/max statistics can be enormous: in one inspected file the `text` maximum alone was 1,241,181 bytes.
+
+A non-destructive rewrite of all 365 files in the 2025 partition produced the following exact-row-equivalent results:
+
+| Writer/options | Parquet file version | Bytes |
+| --- | ---: | ---: |
+| Existing Polars, statistics enabled | 1.0 | 265,018,759 |
+| Same Polars/Zstd, statistics disabled | 1.0 | **80,357,017** |
+| PyArrow via Polars, statistics retained except `text` | 1.0 | 94,352,817 |
+| PyArrow via Polars, statistics retained except `text` | 2.6 | 94,356,788 |
+
+Changing only PyArrow's logical-type version from 1.0 to 2.6 changed this partition by about 4 KB; enabling Data Page V2 also had a negligible size effect. PyArrow, DuckDB, and the browser's hyparquet reader successfully read the tested 1.0, 2.6, and Data Page V2 outputs with equal row/ID/text aggregates. A warm DuckDB full-text scan of the partition took about 0.12 seconds for every variant. The material optimization is therefore suppressing unhelpful `text` statistics/page indexes, not raising the nominal Parquet version. No dataset files or publisher settings were changed during this audit.

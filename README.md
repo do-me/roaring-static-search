@@ -6,6 +6,8 @@ The [EUR-LEX search page](https://do-me.github.io/roaring-static-search/) is dep
 
 After a search, the page can complete the exhaustive exact result set, hydrate every source column, and create a private DuckDB-Wasm table named `search_results`. SQL previews and full-query Parquet, CSV, and Excel exports run in the browser. DuckDB is lazy-loaded only when the analysis workspace is requested; very broad result sets remain subject to browser memory limits.
 
+The demo keeps its query, inclusive year bounds, search-all and deduplication choices, and any edited SQL in the URL (`q`, `from`, `to`, `all`, `dedupe`, and `sql`). Reloading or sharing that URL restores the controls without automatically rerunning a potentially expensive search. Light, dark, and automatic colour preferences are kept locally in the browser.
+
 ## Build an index
 
 ```bash
@@ -95,6 +97,8 @@ npm run test:browser  # requires Google Chrome on macOS
 ```
 
 The tests include Python-to-WASM Roaring compatibility, nested AND/OR, false-positive phrase candidates, pagination, Unicode, and a real Chrome static-page smoke test.
+
+For corpus audits, `benchmarks/copernicus_parity.py` compares a live single-term posting with a full local DuckDB scan, while `benchmarks/parquet_format_audit.py` reports physical Parquet versions, compression, encodings, row groups, and metadata size without reading column data.
 
 See [offline EUR-LEX results](benchmarks/RESULTS.md) for corpus-scale build size, FTS5 parity, and browser timing under a simulated network.
 
