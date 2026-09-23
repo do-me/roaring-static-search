@@ -22,6 +22,16 @@ try {
   Object.assign(manifest.shards[0], { yearStart: 2020, yearEnd: 2020 });
   Object.assign(manifest.shards[1], { yearStart: 2026, yearEnd: 2026 });
   await writeFile(manifestPath, JSON.stringify(manifest));
+  const paginationJsonl = path.join(dataDir, "pagination.jsonl");
+  await writeFile(paginationJsonl, Array.from({ length: 125 }, (_, index) => JSON.stringify({
+    id: `PAGE-${String(index + 1).padStart(3, "0")}`,
+    title: `Pagination row ${index + 1}`,
+    text: `pagination fixture document ${index + 1}`,
+  })).join("\n") + "\n");
+  execFileSync("uv", ["run", "roaring-static-search", "build", "--jsonl", paginationJsonl,
+    "--out", path.join(dataDir, "pagination/shard"), "--metadata-fields", "title"], { cwd: root });
+  execFileSync("uv", ["run", "roaring-static-search", "manifest", "--out", path.join(dataDir, "pagination/manifest.json"),
+    "pagination=shard/shard.json"], { cwd: root });
   execFileSync("npm", ["run", "build:demo"], { cwd: root });
   server = await startDemoServer({ dataDir });
   const sourceFile = path.join(dataDir, "source/files/example.parquet");
@@ -90,7 +100,7 @@ try {
   await page.locator("#query").fill("climate");
   await page.locator("#year-from").fill("2026");
   await page.locator("#year-to").fill("2026");
-  await page.locator("#search-all").check();
+  await page.locator("#scope-all").check();
   assert.equal(await page.locator("#deduplicate").isChecked(), true);
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.includes("2 shown"));
@@ -109,8 +119,20 @@ try {
   assert.equal(await page.locator("#query").inputValue(), "climate");
   assert.equal(await page.locator("#year-from").inputValue(), "2026");
   assert.equal(await page.locator("#year-to").inputValue(), "2026");
-  assert.equal(await page.locator("#search-all").isChecked(), true);
+  assert.equal(await page.locator("#scope-all").isChecked(), true);
   assert.equal(await page.locator("#deduplicate").isChecked(), false);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?manifest=/data/pagination/manifest.json`);
+  await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
+  await page.locator("#query").fill("pagination");
+  await page.locator("#search-form button[type=submit]").click();
+  await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("50 shown"));
+  const resultScroller = page.locator('#results [role="group"][aria-labelledby="caption"]');
+  await resultScroller.evaluate((element) => { element.scrollTop = element.scrollHeight; element.dispatchEvent(new Event("scroll")); });
+  await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("100 shown"));
+  assert.ok(await resultScroller.evaluate((element) => element.scrollTop > 0));
+  await resultScroller.evaluate((element) => { element.scrollTop = element.scrollHeight; element.dispatchEvent(new Event("scroll")); });
+  await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("125 shown"));
+  assert.equal(await page.locator("#more").count(), 0);
   await page.goto(`http://127.0.0.1:${server.address().port}/?manifest=/data/external/manifest.json`);
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
   await page.locator("#query").fill('"greenhouse gas"');
@@ -124,7 +146,7 @@ try {
   assert.match(await page.getByRole("alert").textContent(), /HTTP 404/);
   assert.equal(await page.getByRole("button", { name: "Retry" }).isVisible(), true);
   assert.deepEqual(errors.filter((message) => !message.includes("/data/missing.json") && !message.match(/duckdb-(?:eh|mvp).*\.wasm: net::ERR_ABORTED/)), []);
-  console.log("Chrome browser smoke test passed: themes, search, valid SQL exports, chart, errors, and Parquet hydration");
+  console.log("Chrome browser smoke test passed: themes, search modes, automatic pagination, URL state, valid SQL exports, chart, errors, and Parquet hydration");
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));

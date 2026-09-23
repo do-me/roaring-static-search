@@ -182,6 +182,16 @@ function Toggle({ id, checked, onChange, disabled = false, children }) {
   </label>;
 }
 
+function ScopeOption({ id, checked, onChange, title, children }) {
+  return <label htmlFor={id} className={`flex cursor-pointer gap-3 border p-3 transition ${checked ? "border-green-800 bg-green-50" : "border-stone-300 bg-white hover:border-stone-400"}`}>
+    <input id={id} name="result-scope" type="radio" checked={checked} onChange={onChange} className="mt-0.5 size-4 shrink-0 accent-green-800" />
+    <span>
+      <strong className="block text-sm font-semibold text-stone-950">{title}</strong>
+      <span className="mt-1 block text-xs leading-5 text-stone-600">{children}</span>
+    </span>
+  </label>;
+}
+
 const THEME_OPTIONS = ["light", "dark", "auto"];
 
 function useTheme() {
@@ -232,6 +242,9 @@ function App() {
   const [analysisEpoch, setAnalysisEpoch] = useState(0);
   const generation = useRef(0);
   const activeSearch = useRef(null);
+  const skipNextFrame = useRef(false);
+  const resultsRef = useRef(null);
+  const autoLoadPending = useRef(false);
   const [data, setData] = useState(() => new SearchResultsDataFrame([], null));
 
   const displayHits = useMemo(() => lastWasAll && deduplicate ? uniqueById(rawHits) : rawHits, [deduplicate, lastWasAll, rawHits]);
@@ -246,7 +259,13 @@ function App() {
     return frame;
   }, []);
 
-  React.useEffect(() => { newFrame(displayHits); }, [displayHits, newFrame]);
+  React.useEffect(() => {
+    if (skipNextFrame.current) {
+      skipNextFrame.current = false;
+      return;
+    }
+    newFrame(displayHits);
+  }, [displayHits, newFrame]);
 
   React.useEffect(() => {
     const url = new URL(location.href);
@@ -273,7 +292,7 @@ function App() {
     setBusy(true);
     setFailure(null);
     setDetail(null);
-    setStatus(request.searchAll ? "Finding every exact match…" : "Searching…");
+    setStatus(append ? "Loading the next 50 exact matches…" : request.searchAll ? "Finding every exact match…" : "Finding the first 50 exact matches…");
     try {
       const answer = await search.search(request.query, {
         limit: request.searchAll ? null : 50,
@@ -293,6 +312,10 @@ function App() {
         },
       });
       const combined = append ? [...rawHits, ...answer.hits] : answer.hits;
+      if (append) {
+        skipNextFrame.current = true;
+        data.append(answer.hits);
+      }
       setRawHits(combined);
       setLastWasAll(request.searchAll);
       setCursor(request.searchAll ? null : answer.nextCursor);
@@ -308,7 +331,7 @@ function App() {
     } finally {
       setBusy(false);
     }
-  }, [busy, cursor, deduplicate, query, rawHits, searchAll, yearFrom, yearTo]);
+  }, [busy, cursor, data, deduplicate, query, rawHits, searchAll, yearFrom, yearTo]);
 
   const prepareAnalysisRows = useCallback(async (report) => {
     const request = activeSearch.current;
@@ -391,6 +414,19 @@ function App() {
     : "Full columns are fetched from source Parquet only for rows in view.", [hydration]);
   const canLoadMore = cursor && !searchAll && signature === `${activeSearch.current?.query}\u0000${activeSearch.current?.yearFrom}\u0000${activeSearch.current?.yearTo}\u0000${activeSearch.current?.searchAll}`;
 
+  React.useEffect(() => {
+    const scroller = resultsRef.current?.querySelector('[role="group"][aria-labelledby="caption"]');
+    if (!scroller || !canLoadMore) return;
+    const loadAtBottom = () => {
+      const remaining = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      if (remaining > Math.max(120, scroller.clientHeight * 0.2) || busy || autoLoadPending.current) return;
+      autoLoadPending.current = true;
+      Promise.resolve(run(true)).finally(() => { autoLoadPending.current = false; });
+    };
+    scroller.addEventListener("scroll", loadAtBottom, { passive: true });
+    return () => scroller.removeEventListener("scroll", loadAtBottom);
+  }, [busy, canLoadMore, data, run]);
+
   return <div className="min-h-screen bg-stone-50 text-stone-900">
     <header className="border-b border-stone-300 bg-white">
       <div className="mx-auto flex max-w-[1800px] items-end justify-between gap-8 px-5 py-6 lg:px-10">
@@ -405,27 +441,44 @@ function App() {
     </header>
 
     <main className="mx-auto max-w-[1800px] px-5 py-7 lg:px-10">
-      <p className="max-w-4xl text-sm leading-6 text-stone-600">Use exact terms, <code className="border-b border-stone-400 font-mono text-xs text-stone-900">AND</code>, <code className="border-b border-stone-400 font-mono text-xs text-stone-900">OR</code>, parentheses, and quoted phrases such as <code className="border-b border-stone-400 font-mono text-xs text-stone-900">&quot;gender-based violence&quot;</code>. Quotes are required for hyphenated or multi-word phrases. The selected years determine which index shards and document ranges are read.</p>
+      <p className="max-w-4xl text-sm leading-6 text-stone-600">Use exact terms, <code className="border-b border-stone-400 font-mono text-xs text-stone-900">AND</code>, <code className="border-b border-stone-400 font-mono text-xs text-stone-900">OR</code>, parentheses, and quoted phrases such as <code className="border-b border-stone-400 font-mono text-xs text-stone-900">&quot;gender-based violence&quot;</code>. Quotes are required for hyphenated or multi-word phrases.</p>
 
       <form id="search-form" className="mt-6" onSubmit={(event) => { event.preventDefault(); run(false); }}>
         <label htmlFor="query" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-stone-600">Boolean query</label>
         <div className="flex flex-col gap-2 md:flex-row">
           <input id="query" value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Search query" spellCheck="false" className="min-w-0 flex-1 border border-stone-400 bg-white px-4 py-3 font-mono text-sm outline-none transition focus:border-green-800 focus:ring-2 focus:ring-green-800/15" />
-          <button type="submit" disabled={busy} className="border border-stone-950 bg-stone-950 px-7 py-3 text-sm font-semibold text-white transition hover:bg-green-900 disabled:cursor-wait disabled:opacity-50">{busy ? "Searching…" : "Search"}</button>
+          <button type="submit" disabled={busy} className="border border-stone-950 bg-stone-950 px-7 py-3 text-sm font-semibold text-white transition hover:bg-green-900 disabled:cursor-wait disabled:opacity-50">{busy ? (searchAll ? "Finding all…" : "Finding 50…") : (searchAll ? "Find all matches" : "Show first 50")}</button>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-4 border-b border-stone-300 pb-5">
-          <label htmlFor="year-from" className="text-xs font-medium text-stone-600">From
-            <input id="year-from" type="number" min={bounds.min} max={bounds.max} value={yearFrom} onChange={(event) => setYearFrom(Number(event.target.value))} className="ml-2 w-24 border-b border-stone-400 bg-transparent px-1 py-1 font-mono text-sm text-stone-950 outline-none focus:border-green-800" />
-          </label>
-          <label htmlFor="year-to" className="text-xs font-medium text-stone-600">To
-            <input id="year-to" type="number" min={bounds.min} max={bounds.max} value={yearTo} onChange={(event) => setYearTo(Number(event.target.value))} className="ml-2 w-24 border-b border-stone-400 bg-transparent px-1 py-1 font-mono text-sm text-stone-950 outline-none focus:border-green-800" />
-          </label>
-          <Toggle id="search-all" checked={searchAll} onChange={setSearchAll}>Search all documents</Toggle>
-          <Toggle id="deduplicate" checked={deduplicate} onChange={setDeduplicate}>Deduplicate by ID for full results / SQL</Toggle>
-          <span className="ml-auto font-mono text-[11px] text-stone-500">available {bounds.min}–{bounds.max}</span>
+        <div className="mt-5 grid gap-3 lg:grid-cols-[minmax(360px,1.35fr)_minmax(250px,0.8fr)_minmax(280px,0.85fr)]">
+          <fieldset className="border border-stone-300 bg-stone-100 p-4">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-stone-600">Result scope</legend>
+            <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+              <ScopeOption id="scope-preview" checked={!searchAll} onChange={() => setSearchAll(false)} title="Preview first 50">Shows the first 50 exact matches in stable source order. Reaching the table bottom loads 50 more.</ScopeOption>
+              <ScopeOption id="scope-all" checked={searchAll} onChange={() => setSearchAll(true)} title="Complete result set">Finds every exact match now. Enables the complete timeline and may transfer much more for phrases.</ScopeOption>
+            </div>
+          </fieldset>
+
+          <fieldset className="border border-stone-300 bg-white p-4">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-stone-600">Year range</legend>
+            <div className="mt-1 flex items-center gap-3">
+              <label htmlFor="year-from" className="text-xs font-medium text-stone-600">From
+                <input id="year-from" type="number" min={bounds.min} max={bounds.max} value={yearFrom} onChange={(event) => setYearFrom(Number(event.target.value))} className="mt-1 block w-full border border-stone-400 bg-white px-2 py-2 font-mono text-sm text-stone-950 outline-none focus:border-green-800" />
+              </label>
+              <span className="mt-5 text-stone-400">—</span>
+              <label htmlFor="year-to" className="text-xs font-medium text-stone-600">To
+                <input id="year-to" type="number" min={bounds.min} max={bounds.max} value={yearTo} onChange={(event) => setYearTo(Number(event.target.value))} className="mt-1 block w-full border border-stone-400 bg-white px-2 py-2 font-mono text-sm text-stone-950 outline-none focus:border-green-800" />
+              </label>
+            </div>
+            <p className="mt-3 text-xs leading-5 text-stone-500">Only matching year shards and source rows are read. Available: <span className="font-mono">{bounds.min}–{bounds.max}</span>.</p>
+          </fieldset>
+
+          <fieldset className="border border-stone-300 bg-white p-4">
+            <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-stone-600">Result handling</legend>
+            <div className="mt-2"><Toggle id="deduplicate" checked={deduplicate} onChange={setDeduplicate}>Deduplicate matching IDs</Toggle></div>
+            <p className="mt-3 text-xs leading-5 text-stone-500">Applied to complete results, the timeline, and the DuckDB analysis table. Preview ordering is deterministic, not random or relevance-ranked.</p>
+          </fieldset>
         </div>
-        {searchAll && <p className="mt-3 text-xs text-stone-500">Search all verifies every phrase candidate and can transfer more source data for broad phrase queries.</p>}
         {query.includes('"') && <p className="mt-3 text-xs text-stone-500">Quoted phrases intersect word postings first, then inspect candidate source texts for exact token adjacency. Common words can produce many candidates and touch many Parquet files.</p>}
       </form>
 
@@ -444,12 +497,12 @@ function App() {
       <div className="mt-7 mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold">Results</h2>
-          <p className="mt-1 text-xs text-stone-500">All 14 columns · scroll horizontally · double-click a cell to inspect its full value.</p>
+          <p className="mt-1 text-xs text-stone-500">All 14 columns · stable source order · scroll horizontally · double-click a cell to inspect its full value.{canLoadMore ? " Scroll to the bottom for the next 50." : ""}</p>
         </div>
-        {canLoadMore && <button id="more" type="button" disabled={busy} onClick={() => run(true)} className="border-b border-stone-800 pb-0.5 text-xs font-semibold hover:border-green-800 hover:text-green-800 disabled:opacity-50">Load 50 more</button>}
+        {canLoadMore && <button id="more" type="button" disabled={busy} onClick={() => run(true)} className="border-b border-stone-800 pb-0.5 text-xs font-semibold hover:border-green-800 hover:text-green-800 disabled:opacity-50">Load next 50 now</button>}
       </div>
 
-      <div id="results" className="table-shell flex h-[clamp(420px,60vh,720px)] min-h-0 overflow-hidden border border-stone-300 bg-white">
+      <div id="results" ref={resultsRef} className="table-shell flex h-[clamp(420px,60vh,720px)] min-h-0 overflow-hidden border border-stone-300 bg-white">
         {data.numRows ? <HighTable
           key={generation.current} data={data} cacheKey="eur-lex-search-results-v2"
           columnConfiguration={COLUMN_CONFIGURATION} focus={false} maxRowNumber={data.numRows}

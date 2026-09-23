@@ -19,6 +19,7 @@ button { cursor: pointer; }
 [data-theme="dark"] .bg-stone-100 { background-color: #292524; }
 [data-theme="dark"] .bg-white { background-color: #1c1917; }
 [data-theme="dark"] .bg-red-50 { background-color: #450a0a; }
+[data-theme="dark"] .bg-green-50 { background-color: #052e16; }
 [data-theme="dark"] .bg-stone-950 { background-color: #14532d; }
 [data-theme="dark"] .text-stone-950,
 [data-theme="dark"] .text-stone-900 { color: #fafaf9; }

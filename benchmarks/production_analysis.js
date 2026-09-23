@@ -21,7 +21,7 @@ try {
     return state.get("q") === "copernicus AND clms" && state.get("from") === "1973";
   });
   await page.locator("#search-form button").click();
-  await page.waitForFunction(() => document.querySelector("#search-form button")?.textContent === "Search", null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelector("#search-form button[type=submit]")?.disabled === false, null, { timeout: 30000 });
   const searchStatus = await page.locator("#status").textContent();
   const searchMs = performance.now() - started;
   if (!await page.locator("#prepare-analysis").count()) {

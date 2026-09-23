@@ -90,11 +90,11 @@ The phrase-only table needed no additional column transfer because phrase verifi
 
 ## Exact live-index parity audit (2026-09-23)
 
-`benchmarks/copernicus_parity.py` compared the live `copernicus` posting with a DuckDB regex scan over all 19,587 local source files. Both returned the same **1,019 physical source rows**: 899 unique nonblank external IDs and 120 rows with blank IDs. There were no live-only rows, local-only rows, duplicate nonblank IDs, or ID disagreements. The live manifest contained 330,209 documents while the local snapshot contained 330,163; none of the 46 additional live documents matched `copernicus`. The live fetch/mapping took 28.2 seconds and the local full scan 9.0 seconds in this run.
+`benchmarks/copernicus_parity.py` compared the live `copernicus` posting with a DuckDB regex scan after synchronizing the local source snapshot byte-for-byte with Hugging Face revision `4c51d3968f5914322a229509d40921295c4c9e58`. Both snapshots contain 19,592 Parquet files / 330,209 documents, and both query paths returned the same **1,019 physical source rows**: 899 unique nonblank external IDs and 120 rows with blank IDs. There were no live-only rows, local-only rows, duplicate nonblank IDs, or ID disagreements. The live fetch/mapping took 27.2 seconds and the local full scan 7.8 seconds in this run.
 
 ## Parquet physical-layout audit (2026-09-23)
 
-All 19,587 local files report Parquet file version 1.0, were written by Polars, use Zstandard, share one schema, and contain 330,163 rows / 6,710,151,560 bytes. The median file has only 6 rows and is 80,255 bytes. The files contain 1.21 GB of serialized footers plus additional page-index/structural data. Full-text min/max statistics can be enormous: in one inspected file the `text` maximum alone was 1,241,181 bytes.
+All 19,592 synchronized local files report Parquet file version 1.0, were written by Polars, use Zstandard, share one schema, and contain 330,209 rows / 6,714,298,521 bytes. The median file has only 6 rows and is 80,249.5 bytes. The files contain 1,211,911,868 bytes of serialized footers plus additional page-index/structural data. Full-text min/max statistics can be enormous: in one inspected file the `text` maximum alone was 1,241,181 bytes.
 
 A non-destructive rewrite of all 365 files in the 2025 partition produced the following exact-row-equivalent results:
 
