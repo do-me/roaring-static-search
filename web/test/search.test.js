@@ -88,6 +88,21 @@ test("phrase false positives are skipped without losing pagination", async () =>
   assert.deepEqual(exhaustive.hits.map((hit) => hit.id), ["A", "F", "H"]);
 });
 
+test("phrase verification reports candidate and batch progress", async () => {
+  const updates = [];
+  const answer = await search.search('"greenhouse gas"', {
+    exhaustive: true,
+    verificationBatchSize: 2,
+    onProgress: (update) => updates.push(update),
+  });
+  assert.equal(updates[0].phase, "candidates");
+  assert.equal(updates[0].candidateCount, 4);
+  assert.equal(updates.at(-1).phase, "verification");
+  assert.equal(updates.at(-1).processedCandidates, 4);
+  assert.equal(updates.at(-1).verifiedTexts, 4);
+  assert.equal(updates.at(-1).hits, answer.hits.length);
+});
+
 test("Unicode tokens and mixed Boolean query", async () => {
   const answer = await search.search('café OR co2');
   assert.deepEqual(answer.hits.map((hit) => hit.id), ["C", "G"]);

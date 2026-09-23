@@ -23,6 +23,7 @@
     "roaring-wasm": "^1.1.0"
   },
   "devDependencies": {
+    "@duckdb/duckdb-wasm": "^1.33.1-dev57.0",
     "@tailwindcss/vite": "^4.3.3",
     "hightable": "^0.26.4",
     "playwright-core": "^1.58.0",

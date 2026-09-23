@@ -30,7 +30,13 @@ export function startDemoServer({ dataDir, sourceDir = null, port = 0, delayMs =
     const start = match ? Number(match[1]) : 0;
     const end = match ? Number(match[2]) : info.size - 1;
     if (start > end || end >= info.size) { response.writeHead(416).end(); return; }
-    const mime = requested.endsWith(".html") ? "text/html" : requested.endsWith(".js") ? "text/javascript" : requested.endsWith(".json") ? "application/json" : "application/octet-stream";
+    const mime = requested.endsWith(".html") ? "text/html"
+      : requested.endsWith(".js") ? "text/javascript"
+      : requested.endsWith(".css") ? "text/css"
+      : requested.endsWith(".json") ? "application/json"
+      : requested.endsWith(".svg") ? "image/svg+xml"
+      : requested.endsWith(".wasm") ? "application/wasm"
+      : "application/octet-stream";
     const headers = { "Content-Type": mime, "Content-Length": end - start + 1, "Accept-Ranges": "bytes", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" };
     if (match) headers["Content-Range"] = `bytes ${start}-${end}/${info.size}`;
     if (delayMs) await new Promise((resolve) => setTimeout(resolve, delayMs));

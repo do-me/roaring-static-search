@@ -5,6 +5,7 @@ import "hightable/src/HighTable.css";
 import "./style.css";
 
 import { StaticSearch } from "../src/index.js";
+import AnalysisPanel from "./AnalysisPanel.jsx";
 
 const COLUMNS = [
   "url", "celex", "eli", "title", "date", "lang", "institutions",
@@ -44,7 +45,13 @@ function stringify(value) {
 
 function uniqueById(hits) {
   const seen = new Set();
-  return hits.filter((hit) => !seen.has(hit.id) && seen.add(hit.id));
+  return hits.filter((hit) => {
+    const id = typeof hit.id === "string" ? hit.id.trim() : hit.id;
+    if (id == null || id === "") return true;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 class SearchResultsDataFrame {
@@ -175,6 +182,7 @@ function App() {
   const [detail, setDetail] = useState(null);
   const [rawHits, setRawHits] = useState([]);
   const [lastWasAll, setLastWasAll] = useState(false);
+  const [analysisEpoch, setAnalysisEpoch] = useState(0);
   const generation = useRef(0);
   const activeSearch = useRef(null);
   const [data, setData] = useState(() => new SearchResultsDataFrame([], null));
@@ -202,6 +210,7 @@ function App() {
       return;
     }
     if (!append) activeSearch.current = request;
+    if (!append) setAnalysisEpoch((value) => value + 1);
     setBusy(true);
     setFailure(null);
     setDetail(null);
@@ -215,6 +224,14 @@ function App() {
         verificationBatchSize,
         yearFrom: request.yearFrom,
         yearTo: request.yearTo,
+        onProgress: (progress) => {
+          if (!progress.requiresPhraseVerification) return;
+          if (progress.phase === "candidates") {
+            setStatus(`Exact phrase verification · ${progress.candidateCount.toLocaleString()} bitmap candidates…`);
+          } else {
+            setStatus(`Verifying exact phrases · ${progress.processedCandidates.toLocaleString()} / ${progress.candidateCount.toLocaleString()} candidates · ${progress.hits.toLocaleString()} matches`);
+          }
+        },
       });
       const combined = append ? [...rawHits, ...answer.hits] : answer.hits;
       setRawHits(combined);
@@ -233,6 +250,54 @@ function App() {
       setBusy(false);
     }
   }, [busy, cursor, deduplicate, query, rawHits, searchAll, yearFrom, yearTo]);
+
+  const prepareAnalysisRows = useCallback(async (report) => {
+    const request = activeSearch.current;
+    if (!request?.query) throw new Error("Run a search before preparing analysis.");
+    let hits = rawHits;
+    let searchRequests = 0;
+    let searchBytes = 0;
+    if (!lastWasAll) {
+      report("Completing the exhaustive exact search…");
+      const answer = await search.search(request.query, {
+        limit: null,
+        exhaustive: true,
+        includeMetadata: false,
+        verificationBatchSize,
+        yearFrom: request.yearFrom,
+        yearTo: request.yearTo,
+        onProgress: (progress) => {
+          if (progress.phase === "candidates") {
+            report(`${progress.candidateCount.toLocaleString()} bitmap candidates selected…`);
+          } else if (progress.requiresPhraseVerification) {
+            report(`Verifying exact phrases · ${progress.processedCandidates.toLocaleString()} / ${progress.candidateCount.toLocaleString()} candidates · ${progress.hits.toLocaleString()} matches`);
+          }
+        },
+      });
+      hits = answer.hits;
+      searchRequests = answer.networkRequests;
+      searchBytes = answer.networkBytes;
+    }
+    const selected = deduplicate ? uniqueById(hits) : hits;
+    if (!selected.length) throw new Error("The exact result set is empty.");
+    report(`Fetching all 14 source columns for ${selected.length.toLocaleString()} exact rows…`);
+    const source = await search.getSourceRows(selected, { columns: COLUMNS });
+    const rows = source.rows.map((row, index) => ({
+      _search_rank: index + 1,
+      _search_year: selected[index].year ?? null,
+      _search_shard: selected[index].shard,
+      _search_doc_id: selected[index].docId,
+      _search_external_id: selected[index].id,
+      ...row,
+    }));
+    return {
+      rows,
+      sourceMatchCount: hits.length,
+      duplicatesRemoved: hits.length - selected.length,
+      networkRequests: searchRequests + source.networkRequests,
+      networkBytes: searchBytes + source.networkBytes,
+    };
+  }, [deduplicate, lastWasAll, rawHits]);
 
   React.useEffect(() => {
     search.ready().then(async () => {
@@ -271,7 +336,6 @@ function App() {
     <header className="border-b border-stone-300 bg-white">
       <div className="mx-auto flex max-w-[1800px] items-end justify-between gap-8 px-5 py-6 lg:px-10">
         <div>
-          <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-green-800">Static browser search · experimental</p>
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">EUR-LEX full-text search</h1>
         </div>
         <a className="hidden text-sm text-stone-600 underline-offset-4 hover:text-stone-950 hover:underline sm:block" href="https://huggingface.co/datasets/do-me/EUR-LEX">View dataset ↗</a>
@@ -279,7 +343,7 @@ function App() {
     </header>
 
     <main className="mx-auto max-w-[1800px] px-5 py-7 lg:px-10">
-      <p className="max-w-4xl text-sm leading-6 text-stone-600">Use exact terms, <code className="border-b border-stone-400 font-mono text-xs text-stone-900">AND</code>, <code className="border-b border-stone-400 font-mono text-xs text-stone-900">OR</code>, parentheses, and quoted phrases. The selected years determine which index shards and document ranges are read.</p>
+      <p className="max-w-4xl text-sm leading-6 text-stone-600">Use exact terms, <code className="border-b border-stone-400 font-mono text-xs text-stone-900">AND</code>, <code className="border-b border-stone-400 font-mono text-xs text-stone-900">OR</code>, parentheses, and quoted phrases such as <code className="border-b border-stone-400 font-mono text-xs text-stone-900">&quot;gender-based violence&quot;</code>. Quotes are required for hyphenated or multi-word phrases. The selected years determine which index shards and document ranges are read.</p>
 
       <form id="search-form" className="mt-6" onSubmit={(event) => { event.preventDefault(); run(false); }}>
         <label htmlFor="query" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-stone-600">Boolean query</label>
@@ -296,10 +360,11 @@ function App() {
             <input id="year-to" type="number" min={bounds.min} max={bounds.max} value={yearTo} onChange={(event) => setYearTo(Number(event.target.value))} className="ml-2 w-24 border-b border-stone-400 bg-transparent px-1 py-1 font-mono text-sm text-stone-950 outline-none focus:border-green-800" />
           </label>
           <Toggle id="search-all" checked={searchAll} onChange={setSearchAll}>Search all documents</Toggle>
-          <Toggle id="deduplicate" checked={deduplicate} onChange={setDeduplicate} disabled={!searchAll}>Deduplicate by ID</Toggle>
+          <Toggle id="deduplicate" checked={deduplicate} onChange={setDeduplicate}>Deduplicate by ID for full results / SQL</Toggle>
           <span className="ml-auto font-mono text-[11px] text-stone-500">available {bounds.min}–{bounds.max}</span>
         </div>
         {searchAll && <p className="mt-3 text-xs text-stone-500">Search all verifies every phrase candidate and can transfer more source data for broad phrase queries.</p>}
+        {query.includes('"') && <p className="mt-3 text-xs text-stone-500">Quoted phrases intersect word postings first, then inspect candidate source texts for exact token adjacency. Common words can produce many candidates and touch many Parquet files.</p>}
       </form>
 
       <div className="mt-4 min-h-10 text-sm" aria-live="polite">
@@ -343,6 +408,8 @@ function App() {
         </div>
         <pre className="mt-3 max-h-[38vh] overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-5 text-stone-700">{stringify(detail.value)}</pre>
       </section>}
+
+      {rawHits.length > 0 && <AnalysisPanel epoch={analysisEpoch} prepareRows={prepareAnalysisRows} deduplicate={deduplicate} />}
     </main>
 
     <footer className="mx-auto max-w-[1800px] border-t border-stone-300 px-5 py-5 text-xs leading-5 text-stone-500 lg:px-10">Runs entirely in your browser from a <a className="text-stone-800 underline" href="https://github.com/do-me/roaring-static-search">static Roaring index</a>. Exact phrases and visible table rows resolve against immutable source Parquet. The dataset’s normal weekly publisher remains independent.</footer>

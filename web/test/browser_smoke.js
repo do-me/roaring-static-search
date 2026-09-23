@@ -43,9 +43,27 @@ try {
   try { await page.locator('#results td[aria-colindex="3"]').first().waitFor({ timeout: 5000 }); }
   catch (error) { throw new Error(`${error.message}; status=${await page.locator("#status").textContent()}; errors=${JSON.stringify(errors)}`); }
   assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["A", "H"]);
+  await page.locator("#prepare-analysis").click();
+  try { await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("rows loaded"), null, { timeout: 20000 }); }
+  catch (error) { throw new Error(`${error.message}; analysis=${await page.locator("#analysis-status").textContent()}; alerts=${JSON.stringify(await page.getByRole("alert").allTextContents())}; errors=${JSON.stringify(errors)}`); }
+  await page.locator("#sql").fill("SELECT celex, title FROM search_results ORDER BY celex");
+  await page.locator("#run-sql").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 preview rows"));
+  assert.deepEqual(await page.locator('[aria-labelledby="analysis-title"] tbody td:first-child').allTextContents(), ["A", "H"]);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download CSV" }).click();
+  const download = await downloadPromise;
+  assert.match(download.suggestedFilename(), /\.csv$/);
+  await page.getByRole("button", { name: "Download Parquet" }).waitFor({ state: "visible" });
+  const parquetPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download Parquet" }).click();
+  assert.match((await parquetPromise).suggestedFilename(), /\.parquet$/);
+  const excelPromise = page.waitForEvent("download", { timeout: 30000 });
+  await page.getByRole("button", { name: "Download Excel" }).click();
+  assert.match((await excelPromise).suggestedFilename(), /\.xlsx$/);
   await page.locator("#query").fill('"greenhouse gas"');
   await page.locator("#search-form button").click();
-  await page.waitForFunction(() => document.querySelector("#status").textContent.includes("bitmap candidates"));
+  await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("3 shown"));
   assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["A", "F", "H"]);
   await page.locator("#query").fill("climate");
   await page.locator("#year-from").fill("2026");
@@ -61,7 +79,7 @@ try {
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
   await page.locator("#query").fill('"greenhouse gas"');
   await page.locator("#search-form button").click();
-  await page.waitForFunction(() => document.querySelector("#status").textContent.includes("bitmap candidates"));
+  await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("1 shown"));
   assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["P1"]);
   await page.waitForFunction(() => document.querySelector("#hydration-status").textContent.includes("requests"));
   assert.equal(await page.locator('#results td[aria-colindex="5"]').first().textContent(), "Exact phrase");
@@ -69,8 +87,8 @@ try {
   await page.getByRole("alert").waitFor();
   assert.match(await page.getByRole("alert").textContent(), /HTTP 404/);
   assert.equal(await page.getByRole("button", { name: "Retry" }).isVisible(), true);
-  assert.deepEqual(errors.filter((message) => !message.includes("/data/missing.json")), []);
-  console.log("Chrome browser smoke test passed: year filter, search-all chart, errors, and Parquet hydration");
+  assert.deepEqual(errors.filter((message) => !message.includes("/data/missing.json") && !message.match(/duckdb-(?:eh|mvp).*\.wasm: net::ERR_ABORTED/)), []);
+  console.log("Chrome browser smoke test passed: search, SQL analysis, CSV/Parquet/Excel exports, chart, errors, and Parquet hydration");
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));

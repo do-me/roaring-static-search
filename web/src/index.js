@@ -428,10 +428,11 @@ export class StaticSearch {
     this.readyPromise = null;
   }
 
-  async search(query, { limit = 50, cursor = null, exhaustive = false, includeMetadata = false, verificationBatchSize = 64, yearFrom = null, yearTo = null } = {}) {
+  async search(query, { limit = 50, cursor = null, exhaustive = false, includeMetadata = false, verificationBatchSize = 64, yearFrom = null, yearTo = null, onProgress = null } = {}) {
     const unlimited = limit === null;
     if (!unlimited && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) throw new RangeError("limit must be null or 1..1000");
     if (!Number.isInteger(verificationBatchSize) || verificationBatchSize < 1 || verificationBatchSize > 1000) throw new RangeError("verificationBatchSize must be 1..1000");
+    if (onProgress !== null && typeof onProgress !== "function") throw new TypeError("onProgress must be a function");
     if (yearFrom !== null && !Number.isInteger(yearFrom) || yearTo !== null && !Number.isInteger(yearTo) || yearFrom !== null && yearTo !== null && yearFrom > yearTo) {
       throw new RangeError("yearFrom/yearTo must be ordered integer years");
     }
@@ -455,9 +456,11 @@ export class StaticSearch {
       return { shard, shardIndex, ids, definite };
     }));
     const candidateCount = prepared.reduce((sum, item) => sum + item.ids.length, 0);
+    onProgress?.({ phase: "candidates", candidateCount, processedCandidates: 0, verifiedTexts: 0, hits: 0, requiresPhraseVerification: hasPhrase });
     const hits = [];
     let exactTotal = 0;
     let verifiedTexts = 0;
+    let processedCandidates = 0;
     let nextCursor = null;
     const startShard = cursor?.shard ?? prepared[0]?.shardIndex ?? 0;
     const after = cursor?.after ?? -1;
@@ -481,9 +484,13 @@ export class StaticSearch {
             if (!unlimited && hits.length >= limit && !exhaustive) {
               const moreCandidates = ids.at(-1) > id || prepared.slice(preparedIndex + 1).some((item) => item.ids.length);
               nextCursor = moreCandidates ? { shard: shardIndex, after: id } : null;
+              processedCandidates += batch.indexOf(id) + 1;
+              onProgress?.({ phase: "verification", candidateCount, processedCandidates, verifiedTexts, hits: hits.length, requiresPhraseVerification: hasPhrase });
               break outer;
             }
           }
+          processedCandidates += batch.length;
+          onProgress?.({ phase: "verification", candidateCount, processedCandidates, verifiedTexts, hits: hits.length, requiresPhraseVerification: hasPhrase });
           i += batch.length;
         }
       }
