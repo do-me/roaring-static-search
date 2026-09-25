@@ -128,6 +128,11 @@ try {
   assert.deepEqual(await page.locator('[aria-labelledby="sql-chart-title"] .stacked-segment title').allTextContents(), [
     "2020 · decision: 2", "2020 · regulation: 3", "2021 · decision: 4",
   ]);
+  const stackColors = await page.locator('[aria-labelledby="sql-chart-title"] .stacked-segment').evaluateAll((elements) => elements.map((element) => getComputedStyle(element).fill));
+  assert.equal(new Set(stackColors).size, 2);
+  await page.getByRole("button", { name: "Dark" }).click();
+  assert.deepEqual(await page.locator('[aria-labelledby="sql-chart-title"] .stacked-segment').evaluateAll((elements) => elements.map((element) => getComputedStyle(element).fill)), stackColors);
+  await page.getByRole("button", { name: "Light" }).click();
   assert.match(await page.locator('[aria-labelledby="sql-chart-title"] [aria-label="document_type categories"]').textContent(), /decision.*regulation/);
   await page.locator("#chart-type").selectOption("bar");
   await page.locator("#sql").fill("SELECT range AS year, range AS documents FROM range(0, 250)");

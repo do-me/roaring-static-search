@@ -6,7 +6,9 @@ function shortLabel(value) {
   return value.length > 13 ? `${value.slice(0, 12)}…` : value;
 }
 
-const SERIES_COLORS = ["#166534", "#0f766e", "#b45309", "#6d28d9", "#be123c", "#0369a1", "#4d7c0f", "#a16207", "#7c3aed", "#be185d"];
+// Start with clearly separated blue, amber, violet, and green hues. All are
+// dark enough to keep the white in-bar counts legible in either page theme.
+const SERIES_COLORS = ["#1d4ed8", "#b45309", "#7e22ce", "#15803d", "#be123c", "#0e7490", "#92400e", "#475569", "#a21caf", "#3f6212"];
 
 function StackedSqlBarChart({ bars, xLabel, yLabel, showValues, series, seriesLabel }) {
   const width = Math.max(720, bars.length * 58 + 76);
