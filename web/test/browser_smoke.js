@@ -69,6 +69,7 @@ try {
   catch (error) { throw new Error(`${error.message}; analysis=${await page.locator("#analysis-status").textContent()}; alerts=${JSON.stringify(await page.getByRole("alert").allTextContents())}; errors=${JSON.stringify(errors)}`); }
   assert.ok(page.workers().some((worker) => worker.url().includes("analysis.worker")), "analysis runs in a dedicated worker");
   await page.locator("#sql").fill("SELECT celex, title FROM search_results ORDER BY celex");
+  assert.equal(await page.locator("#run-sql").textContent(), "Run");
   await page.waitForFunction(() => new URLSearchParams(location.hash.slice(1)).has("sqlz") && !new URL(location.href).searchParams.has("sql"));
   assert.equal(await decodeSql(await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get("sqlz"))), "SELECT celex, title FROM search_results ORDER BY celex");
   await page.locator("#run-sql").click();

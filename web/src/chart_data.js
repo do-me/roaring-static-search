@@ -16,9 +16,11 @@ export function numericColumns(columns, rows) {
 export function suggestChartAxes(columns, rows) {
   const numeric = numericColumns(columns, rows);
   if (!numeric.length) return { x: ROW_NUMBER, y: "" };
-  const y = numeric.find((column) => /^(documents|count|total|frequency|n|value)$/i.test(column)) || numeric[0];
+  const year = columns.find((column) => /^(?:year|.*_year)$/i.test(column));
+  const measures = year ? numeric.filter((column) => column !== year) : numeric;
+  const y = measures.find((column) => /^(documents|count|total|frequency|n|value)$/i.test(column)) || measures[0] || "";
   const remaining = columns.filter((column) => column !== y);
-  const x = remaining.find((column) => /^(year|date|month|category|label|name)$/i.test(column))
+  const x = year || remaining.find((column) => /^(date|month|category|label|name)$/i.test(column))
     || remaining.find((column) => !numeric.includes(column))
     || remaining[0] || ROW_NUMBER;
   return { x, y };

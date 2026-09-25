@@ -204,7 +204,7 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
         <label htmlFor="sql" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-stone-600">SQL query</label>
         <textarea id="sql" value={sql} onChange={(event) => editSql(event.target.value)} spellCheck="false" className="h-56 w-full resize-y border border-stone-400 bg-white p-4 font-mono text-xs leading-5 outline-none focus:border-green-800 focus:ring-2 focus:ring-green-800/15" />
         <div className="mt-3 flex flex-wrap gap-2">
-          <button id="run-sql" type="button" disabled={busy} onClick={runSql} className="border border-stone-950 bg-stone-950 px-4 py-2 text-xs font-semibold text-white hover:bg-green-900 disabled:opacity-50">Run preview</button>
+          <button id="run-sql" type="button" disabled={busy} onClick={runSql} className="border border-stone-950 bg-stone-950 px-4 py-2 text-xs font-semibold text-white hover:bg-green-900 disabled:opacity-50">Run</button>
           {[["parquet", "Parquet"], ["csv", "CSV"], ["xlsx", "Excel"]].map(([format, label]) => <button key={format} type="button" disabled={busy} onClick={() => exportResult(format)} className="border border-stone-400 bg-white px-4 py-2 text-xs font-semibold hover:border-green-800 hover:text-green-800 disabled:opacity-50">Download {label}</button>)}
         </div>
         <p className="mt-3 text-xs leading-5 text-stone-500">Use a read-only query beginning with <code className="font-mono">SELECT</code>, <code className="font-mono">WITH</code>, <code className="font-mono">FROM</code>, <code className="font-mono">TABLE</code>, or <code className="font-mono">VALUES</code>. Downloads evaluate the full query, not the 200-row preview.</p>
@@ -241,6 +241,7 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
         </label>
         <label htmlFor="chart-y" className="text-xs font-medium text-stone-600">Y-axis · numeric value
           <select id="chart-y" value={yAxis} onChange={(event) => { chartRevision.current++; setYAxis(event.target.value); setChart(null); setStatus("Chart axes changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+            {!yAxis && <option value="">Choose a measure</option>}
             {numeric.map((column) => <option key={column} value={column}>{column}</option>)}
           </select>
         </label>

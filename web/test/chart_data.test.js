@@ -14,6 +14,12 @@ test("SQL chart suggests year and count, while accepting decimal measures", () =
   });
 });
 
+test("year remains the default label when the measure has a custom name", () => {
+  const rows = [{ year: 2024, methane_hits: 3 }, { year: 2025, methane_hits: 7 }];
+  assert.deepEqual(suggestChartAxes(["year", "methane_hits"], rows), { x: "year", y: "methane_hits" });
+  assert.deepEqual(suggestChartAxes(["year"], [{ year: 2024 }]), { x: "year", y: "" });
+});
+
 test("SQL chart treats null measures as skipped rows and can label by row number", () => {
   const rows = [{ total: 3 }, { total: null }, { total: 5 }];
   assert.deepEqual(suggestChartAxes(["total"], rows), { x: ROW_NUMBER, y: "total" });
