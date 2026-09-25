@@ -211,6 +211,7 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
           {[["parquet", "Parquet"], ["csv", "CSV"], ["xlsx", "Excel"]].map(([format, label]) => <button key={format} type="button" disabled={busy} onClick={() => exportResult(format)} className="border border-stone-400 bg-white px-4 py-2 text-xs font-semibold hover:border-green-800 hover:text-green-800 disabled:opacity-50">Download {label}</button>)}
         </div>
         <p className="mt-3 text-xs leading-5 text-stone-500">Use a read-only query beginning with <code className="font-mono">SELECT</code>, <code className="font-mono">WITH</code>, <code className="font-mono">FROM</code>, <code className="font-mono">TABLE</code>, or <code className="font-mono">VALUES</code>. Downloads evaluate the full query, not the 200-row preview.</p>
+        <p className="mt-1 text-xs leading-5 text-stone-500">Excel cells over 32,767 characters show “exceeding Excel limits”. Use CSV or Parquet when you need the complete text.</p>
       </div>
 
       <div className="min-w-0">

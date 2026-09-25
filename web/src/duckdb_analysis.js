@@ -4,6 +4,7 @@ import ehWorker from "@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url";
 import mvpWasm from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
 import mvpWorker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
 import { CHART_ROW_LIMIT } from "./chart_data.js";
+import { excelSafeQuery, normalizeXlsxBytes } from "./excel_export.js";
 
 const BUNDLES = {
   mvp: { mainModule: mvpWasm, mainWorker: mvpWorker },
@@ -101,24 +102,24 @@ export class BrowserAnalysis {
     if (!settings) throw new Error(`Unsupported export format: ${format}`);
     const expression = queryExpression(sql);
     const filename = `eur-lex-search-${Date.now()}.${settings.extension}`;
+    let exportExpression = expression;
     if (format === "xlsx") {
       await this.connection.query("INSTALL excel; LOAD excel;");
+      const schema = await this.connection.query(`DESCRIBE SELECT * FROM (${expression}) AS __excel_source`);
+      exportExpression = excelSafeQuery(expression, schema.toArray().map((row) => ({
+        column_name: row.column_name,
+        column_type: row.column_type,
+      })));
     }
     await this.db.dropFile(filename).catch(() => {});
     try {
-      await this.connection.query(`COPY (${expression}) TO '${filename}' (${settings.copy})`);
+      await this.connection.query(`COPY (${exportExpression}) TO '${filename}' (${settings.copy})`);
       await this.db.flushFiles();
       // copyFileToBuffer may expose storage owned by DuckDB's virtual filesystem.
       // Keep an independent copy before the temporary file is removed.
-      let bytes = Uint8Array.from(await this.db.copyFileToBuffer(filename));
-      // DuckDB-Wasm currently prefixes XLSX output with one stray ASCII "x"
-      // (duckdb/duckdb-wasm#2119). Strip only that known prefix, then validate ZIP magic.
-      if (format === "xlsx" && bytes[0] === 0x78 && bytes[1] === 0x50 && bytes[2] === 0x4b) {
-        bytes = bytes.slice(1);
-      }
-      if (format === "xlsx" && !(bytes[0] === 0x50 && bytes[1] === 0x4b)) {
-        throw new Error(`DuckDB produced an invalid Excel workbook (${bytes.byteLength} bytes; magic ${[...bytes.subarray(0, 8)].map((value) => value.toString(16).padStart(2, "0")).join(" ") || "empty"}).`);
-      }
+      const copied = Uint8Array.from(await this.db.copyFileToBuffer(filename));
+      // duckdb/duckdb-wasm#2119: the stray leading byte is not always the same.
+      const bytes = format === "xlsx" ? normalizeXlsxBytes(copied) : copied;
       return { filename, mime: settings.mime, bytes };
     } finally {
       await this.db.dropFile(filename).catch(() => {});
