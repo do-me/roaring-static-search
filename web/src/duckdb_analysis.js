@@ -64,26 +64,36 @@ export class BrowserAnalysis {
     this.worker = worker;
     this.rowCount = rowCount;
     this.closed = false;
+    this.previewCache = null;
   }
 
   async preview(sql, limit = 200) {
     const expression = queryExpression(sql);
-    const table = await this.connection.query(`SELECT * FROM (${expression}) AS __preview LIMIT ${Number(limit)}`);
+    if (this.previewCache?.expression === expression) {
+      const { columns, rows } = this.previewCache;
+      return { columns, rows: rows.slice(0, limit), shown: Math.min(rows.length, limit), complete: rows.length <= limit };
+    }
+    const table = await this.connection.query(`SELECT * FROM (${expression}) AS __preview LIMIT ${Number(limit) + 1}`);
     const columns = table.schema.fields.map((field) => field.name);
-    const rows = table.toArray().map((row) => jsValue(row));
-    return { columns, rows, shown: rows.length };
+    const complete = table.numRows <= limit;
+    const rows = table.toArray().slice(0, limit).map((row) => jsValue(row));
+    this.previewCache = complete ? { expression, columns, rows } : null;
+    return { columns, rows, shown: rows.length, complete };
   }
 
   async chartRows(sql) {
     const expression = queryExpression(sql);
+    if (this.previewCache?.expression === expression) return this.previewCache;
     const table = await this.connection.query(`SELECT * FROM (${expression}) AS __chart LIMIT ${CHART_ROW_LIMIT + 1}`);
     if (table.numRows > CHART_ROW_LIMIT) {
       throw new Error(`The SQL output has more than ${CHART_ROW_LIMIT} rows. Add GROUP BY, a filter, or LIMIT before making a bar chart; downloads still use the full query.`);
     }
-    return {
+    const output = {
       columns: table.schema.fields.map((field) => field.name),
       rows: table.toArray().map((row) => jsValue(row)),
     };
+    this.previewCache = { expression, ...output };
+    return output;
   }
 
   async export(sql, format) {

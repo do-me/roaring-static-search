@@ -3,6 +3,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   plugins: [tailwindcss()],
+  worker: { format: "es" },
   base: process.env.GITHUB_PAGES === "true" ? "/roaring-static-search/" : "/",
   root: new URL("./demo", import.meta.url).pathname,
   build: {

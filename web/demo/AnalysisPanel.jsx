@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { barsFromRows, CHART_ROW_LIMIT, numericColumns, ROW_NUMBER, suggestChartAxes } from "../src/chart_data.js";
+import { CHART_ROW_LIMIT, numericColumns, ROW_NUMBER, suggestChartAxes } from "../src/chart_data.js";
+import { AnalysisClient } from "./analysis_client.js";
 import SqlBarChart from "./SqlBarChart.jsx";
 
 export const DEFAULT_SQL = `SELECT
@@ -27,7 +28,10 @@ function download({ bytes, filename, mime }) {
 
 export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, onSqlChange }) {
   const engine = useRef(null);
+  const building = useRef(null);
   const activeEpoch = useRef(epoch);
+  const sqlRevision = useRef(0);
+  const chartRevision = useRef(0);
   const [ready, setReady] = useState(null);
   const [status, setStatus] = useState("Load the complete exact result set into DuckDB when you are ready to analyse it.");
   const [result, setResult] = useState(null);
@@ -42,6 +46,8 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
 
   useEffect(() => {
     activeEpoch.current = epoch;
+    building.current?.close();
+    building.current = null;
     const current = engine.current;
     engine.current = null;
     current?.close();
@@ -49,14 +55,16 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     setResult(null);
     setChart(null);
     setChartFailure(null);
+    if (ready) setStatus("SQL changed · run preview to refresh the output.");
     setFailure(null);
     setBusy(false);
     setStatus("Load the complete exact result set into DuckDB when you are ready to analyse it.");
   }, [epoch]);
 
-  useEffect(() => () => { engine.current?.close(); }, []);
+  useEffect(() => () => { building.current?.close(); engine.current?.close(); }, []);
 
   function showPreview(value, query) {
+    chartRevision.current++;
     setResult({ ...value, sql: query });
     const axes = suggestChartAxes(value.columns, value.rows);
     setXAxis(axes.x);
@@ -66,6 +74,8 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
   }
 
   function editSql(value) {
+    sqlRevision.current++;
+    chartRevision.current++;
     onSqlChange(value);
     setResult(null);
     setChart(null);
@@ -77,25 +87,38 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     setBusy(true);
     setFailure(null);
     const requestedEpoch = epoch;
+    const requestedSqlRevision = sqlRevision.current;
+    let created;
     try {
-      const payload = await prepareRows(setStatus);
-      if (activeEpoch.current !== requestedEpoch) return;
-      setStatus(`Starting DuckDB-Wasm for ${payload.rows.length.toLocaleString()} rows…`);
-      const { BrowserAnalysis } = await import("../src/duckdb_analysis.js");
-      if (activeEpoch.current !== requestedEpoch) return;
+      created = new AnalysisClient();
+      building.current = created;
+      const channel = new MessageChannel();
+      const initializing = created.createFromPort(channel.port1);
+      const source = prepareRows(channel.port2, (message) => {
+        if (activeEpoch.current === requestedEpoch) setStatus(message);
+      }).then((payload) => {
+        if (activeEpoch.current === requestedEpoch) setStatus(`Loading ${payload.rowCount.toLocaleString()} rows into DuckDB-Wasm…`);
+        return payload;
+      });
+      const [payload] = await Promise.all([source, initializing]);
+      if (activeEpoch.current !== requestedEpoch) { created.close(); return; }
+      building.current = null;
       await engine.current?.close();
-      const created = await BrowserAnalysis.create(payload.rows);
       if (activeEpoch.current !== requestedEpoch) { await created.close(); return; }
       engine.current = created;
       setReady(payload);
       const duplicateNote = payload.duplicatesRemoved ? ` · ${payload.duplicatesRemoved.toLocaleString()} duplicate IDs removed` : "";
-      setStatus(`${payload.rows.length.toLocaleString()} exact rows loaded${duplicateNote} · ${payload.networkRequests} new source requests / ${(payload.networkBytes / 1e6).toFixed(2)} MB · data stays in this tab`);
-      showPreview(await engine.current.preview(sql), sql);
+      setStatus(`${payload.rowCount.toLocaleString()} exact rows loaded${duplicateNote} · ${payload.networkRequests} new source requests / ${(payload.networkBytes / 1e6).toFixed(2)} MB · data stays in this tab`);
+      const value = await engine.current.preview(sql);
+      if (activeEpoch.current === requestedEpoch && sqlRevision.current === requestedSqlRevision) showPreview(value, sql);
     } catch (error) {
+      created?.close();
+      if (activeEpoch.current !== requestedEpoch) return;
+      building.current = null;
       setFailure(error.message || "Could not prepare the analysis database.");
       setStatus("Analysis unavailable");
     } finally {
-      setBusy(false);
+      if (activeEpoch.current === requestedEpoch) setBusy(false);
     }
   }
 
@@ -104,15 +127,19 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     setBusy(true);
     setFailure(null);
     setStatus("Running SQL in DuckDB-Wasm…");
+    const requestedEpoch = epoch;
+    const requestedSqlRevision = sqlRevision.current;
     try {
       const value = await engine.current.preview(sql);
+      if (activeEpoch.current !== requestedEpoch || sqlRevision.current !== requestedSqlRevision) return;
       showPreview(value, sql);
       setStatus(`${value.shown.toLocaleString()} preview rows · preview capped at 200; downloads run the complete query`);
     } catch (error) {
+      if (activeEpoch.current !== requestedEpoch || sqlRevision.current !== requestedSqlRevision) return;
       setFailure(error.message || "The SQL query failed.");
       setStatus("SQL query failed");
     } finally {
-      setBusy(false);
+      if (activeEpoch.current === requestedEpoch) setBusy(false);
     }
   }
 
@@ -120,21 +147,22 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     if (!engine.current || !result || busy) return;
     setBusy(true);
     setChartFailure(null);
-    setStatus("Reading the complete SQL output for the bar chart…");
+    setStatus(result.complete ? "Building chart from the cached SQL preview…" : "Reading additional SQL output for the bar chart…");
     const requestedEpoch = epoch;
+    const requestedChartRevision = chartRevision.current;
     try {
-      const output = await engine.current.chartRows(result.sql);
-      if (activeEpoch.current !== requestedEpoch) return;
-      const { bars, skipped } = barsFromRows(output.rows, xAxis, yAxis);
-      setChart({ bars, skipped, x: xAxis, y: yAxis, outputRows: output.rows.length });
-      setShowValues(bars.length <= 60);
-      setStatus(`Bar chart ready · ${bars.length.toLocaleString()} bars${skipped ? ` · ${skipped.toLocaleString()} rows with null Y skipped` : ""}`);
+      const output = await engine.current.chart(result.sql, xAxis, yAxis);
+      if (activeEpoch.current !== requestedEpoch || chartRevision.current !== requestedChartRevision) return;
+      setChart({ ...output, x: xAxis, y: yAxis });
+      setShowValues(output.bars.length <= 60);
+      setStatus(`Bar chart ready · ${output.bars.length.toLocaleString()} bars${output.skipped ? ` · ${output.skipped.toLocaleString()} rows with null Y skipped` : ""}`);
     } catch (error) {
+      if (activeEpoch.current !== requestedEpoch || chartRevision.current !== requestedChartRevision) return;
       setChart(null);
       setChartFailure(error.message || "Could not create the bar chart.");
       setStatus("Bar chart unavailable");
     } finally {
-      setBusy(false);
+      if (activeEpoch.current === requestedEpoch) setBusy(false);
     }
   }
 
@@ -164,7 +192,10 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
       {!ready && <button id="prepare-analysis" type="button" disabled={busy} onClick={prepare} className="border border-stone-950 bg-stone-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-green-900 disabled:cursor-wait disabled:opacity-50">{busy ? "Preparing…" : "Prepare full analysis"}</button>}
     </div>
 
-    <p id="analysis-status" className="mt-3 font-mono text-xs leading-5 text-stone-500" aria-live="polite">{status}</p>
+    <p id="analysis-status" className="mt-3 font-mono text-xs leading-5 text-stone-500" aria-live="polite">
+      {busy && <span className="mr-2 inline-block size-3 animate-spin rounded-full border-2 border-stone-300 border-t-green-800 align-[-1px]" aria-hidden="true" />}
+      {status}
+    </p>
     {!ready && <p className="mt-2 text-xs leading-5 text-stone-500">If the current page contains only the first 50 hits, preparation completes an exhaustive exact search first. ID deduplication is currently <strong>{deduplicate ? "on" : "off"}</strong>. Very broad queries can use substantial transfer and browser memory.</p>}
     {failure && <div className="mt-3 border-l-2 border-red-700 bg-red-50 px-4 py-3 text-sm text-red-950" role="alert">{failure}</div>}
 
@@ -203,19 +234,19 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
       </div>
       {numeric.length ? <div className="mt-4 flex flex-wrap items-end gap-3">
         <label htmlFor="chart-x" className="text-xs font-medium text-stone-600">X-axis · label
-          <select id="chart-x" value={xAxis} onChange={(event) => { setXAxis(event.target.value); setChart(null); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+          <select id="chart-x" value={xAxis} onChange={(event) => { chartRevision.current++; setXAxis(event.target.value); setChart(null); setStatus("Chart axes changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
             <option value={ROW_NUMBER}>Row number</option>
             {result.columns.map((column) => <option key={column} value={column}>{column}</option>)}
           </select>
         </label>
         <label htmlFor="chart-y" className="text-xs font-medium text-stone-600">Y-axis · numeric value
-          <select id="chart-y" value={yAxis} onChange={(event) => { setYAxis(event.target.value); setChart(null); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+          <select id="chart-y" value={yAxis} onChange={(event) => { chartRevision.current++; setYAxis(event.target.value); setChart(null); setStatus("Chart axes changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
             {numeric.map((column) => <option key={column} value={column}>{column}</option>)}
           </select>
         </label>
         <button id="create-sql-chart" type="button" disabled={busy || !yAxis} onClick={createChart} className="border border-stone-950 bg-stone-950 px-4 py-2 text-xs font-semibold text-white hover:bg-green-900 disabled:opacity-50">{busy ? "Building…" : chart ? "Update chart" : "Create bar chart"}</button>
       </div> : <p className="mt-3 text-xs leading-5 text-stone-500">A bar chart needs a numeric output column. Try <code className="font-mono">SELECT date_part('year', CAST(date AS DATE)) AS year, count(*) AS documents FROM search_results GROUP BY year ORDER BY year</code>.</p>}
-      <p className="mt-3 text-xs leading-5 text-stone-500">Creating a chart reruns this SQL for up to {CHART_ROW_LIMIT.toLocaleString()} output rows, beyond the 200-row preview. For larger outputs, aggregate or limit in SQL; downloads still run the full query.</p>
+      <p className="mt-3 text-xs leading-5 text-stone-500">{result.complete ? "The complete SQL output is already cached; charting it does not rerun SQL." : `The preview shows 200 rows. Charting fetches up to ${CHART_ROW_LIMIT.toLocaleString()} rows once; changing chart axes reuses them.`} For larger outputs, aggregate or limit in SQL; downloads still run the full query.</p>
       {chartFailure && <p className="mt-3 border-l-2 border-red-700 bg-red-50 px-4 py-2 text-xs text-red-950" role="alert">{chartFailure}</p>}
       {chart && <div className="mt-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">

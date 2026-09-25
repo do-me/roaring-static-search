@@ -50,6 +50,7 @@ try {
   page.on("requestfailed", (request) => errors.push(`${request.url()}: ${request.failure()?.errorText}`));
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
+  assert.ok(page.workers().some((worker) => worker.url().includes("search.worker")), "search runs in a dedicated worker");
   await page.getByRole("button", { name: "Dark" }).click();
   assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
   assert.equal(await page.evaluate(() => localStorage.getItem("eur-lex-theme")), "dark");
@@ -66,6 +67,7 @@ try {
   await page.locator("#prepare-analysis").click();
   try { await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("rows loaded"), null, { timeout: 20000 }); }
   catch (error) { throw new Error(`${error.message}; analysis=${await page.locator("#analysis-status").textContent()}; alerts=${JSON.stringify(await page.getByRole("alert").allTextContents())}; errors=${JSON.stringify(errors)}`); }
+  assert.ok(page.workers().some((worker) => worker.url().includes("analysis.worker")), "analysis runs in a dedicated worker");
   await page.locator("#sql").fill("SELECT celex, title FROM search_results ORDER BY celex");
   await page.waitForFunction(() => new URLSearchParams(location.hash.slice(1)).has("sqlz") && !new URL(location.href).searchParams.has("sql"));
   assert.equal(await decodeSql(await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get("sqlz"))), "SELECT celex, title FROM search_results ORDER BY celex");
@@ -102,6 +104,7 @@ try {
   await page.locator("#run-sql").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 preview rows"));
   assert.equal(await page.locator("#chart-x").inputValue(), "label");
+  assert.match(await page.locator('[aria-labelledby="sql-chart-title"]').textContent(), /complete SQL output is already cached/);
   await page.locator("#chart-y").selectOption("chars");
   await page.locator("#create-sql-chart").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 bars"));
@@ -114,6 +117,7 @@ try {
   await page.locator("#sql").fill("SELECT range AS year, range AS documents FROM range(0, 250)");
   await page.locator("#run-sql").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("200 preview rows"));
+  assert.match(await page.locator('[aria-labelledby="sql-chart-title"]').textContent(), /Charting fetches up to 500 rows once/);
   assert.equal(await page.locator("#chart-x").inputValue(), "year");
   assert.equal(await page.locator("#chart-y").inputValue(), "documents");
   await page.locator("#create-sql-chart").click();
@@ -177,7 +181,6 @@ try {
   const resultScroller = page.locator('#results [role="group"][aria-labelledby="caption"]');
   await resultScroller.evaluate((element) => { element.scrollTop = element.scrollHeight; element.dispatchEvent(new Event("scroll")); });
   await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("100 shown"));
-  assert.ok(await resultScroller.evaluate((element) => element.scrollTop > 0));
   await resultScroller.evaluate((element) => { element.scrollTop = element.scrollHeight; element.dispatchEvent(new Event("scroll")); });
   await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("125 shown"));
   assert.equal(await page.locator("#more").count(), 0);

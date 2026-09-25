@@ -4,9 +4,9 @@ import HighTable from "hightable";
 import "hightable/src/HighTable.css";
 import "./style.css";
 
-import { StaticSearch } from "../src/index.js";
 import { decodeSql, encodeSql } from "../src/sql_url.js";
 import AnalysisPanel, { DEFAULT_SQL } from "./AnalysisPanel.jsx";
+import { SearchClient } from "./search_client.js";
 
 const COLUMNS = [
   "url", "celex", "eli", "title", "date", "lang", "institutions",
@@ -52,7 +52,7 @@ const textSources = sourceMap ? {
     concurrency: Number(params.get("sourceConcurrency") || "8"),
   },
 } : {};
-const search = new StaticSearch(new URL(manifestUrl, location.href), { textSources });
+const search = new SearchClient(new URL(manifestUrl, location.href), textSources);
 
 function stringify(value) {
   if (value == null) return "";
@@ -82,6 +82,7 @@ class SearchResultsDataFrame {
     this.queue = Promise.resolve();
     this.networkRequests = 0;
     this.networkBytes = 0;
+    this.hydrated = false;
   }
 
   get numRows() { return this.hits.length; }
@@ -116,15 +117,20 @@ class SearchResultsDataFrame {
       if (selectedColumns.some((column) => !this.cache.get(row)?.has(column))) selectedRows.push(row);
     }
     if (!selectedRows.length || !selectedColumns.length) return;
-    const answer = await search.getSourceRows(selectedRows.map((row) => this.hits[row]), { columns: selectedColumns });
-    selectedRows.forEach((row, index) => {
-      if (!this.cache.has(row)) this.cache.set(row, new Map());
-      for (const column of selectedColumns) this.cache.get(row).set(column, answer.rows[index]?.[column] ?? null);
-    });
-    this.networkRequests += answer.networkRequests;
-    this.networkBytes += answer.networkBytes;
-    this.onHydration?.({ loaded: true, requests: this.networkRequests, bytes: this.networkBytes });
-    this.eventTarget.dispatchEvent(new Event("resolve"));
+    this.onHydration?.({ loading: true, loaded: this.hydrated, requests: this.networkRequests, bytes: this.networkBytes });
+    try {
+      const answer = await search.getSourceRows(selectedRows.map((row) => this.hits[row]), { columns: selectedColumns });
+      selectedRows.forEach((row, index) => {
+        if (!this.cache.has(row)) this.cache.set(row, new Map());
+        for (const column of selectedColumns) this.cache.get(row).set(column, answer.rows[index]?.[column] ?? null);
+      });
+      this.networkRequests += answer.networkRequests;
+      this.networkBytes += answer.networkBytes;
+      this.hydrated = true;
+      this.eventTarget.dispatchEvent(new Event("resolve"));
+    } finally {
+      this.onHydration?.({ loading: false, loaded: this.hydrated, requests: this.networkRequests, bytes: this.networkBytes });
+    }
   }
 }
 
@@ -244,7 +250,7 @@ function App() {
   const [failure, setFailure] = useState(null);
   const [cursor, setCursor] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [hydration, setHydration] = useState({ loaded: false, requests: 0, bytes: 0 });
+  const [hydration, setHydration] = useState({ loading: false, loaded: false, requests: 0, bytes: 0 });
   const [detail, setDetail] = useState(null);
   const [rawHits, setRawHits] = useState([]);
   const [lastWasAll, setLastWasAll] = useState(false);
@@ -260,7 +266,7 @@ function App() {
 
   const newFrame = useCallback((hits) => {
     const current = ++generation.current;
-    setHydration({ loaded: false, requests: 0, bytes: 0 });
+    setHydration({ loading: false, loaded: false, requests: 0, bytes: 0 });
     const frame = new SearchResultsDataFrame(hits, (value) => {
       if (generation.current === current) setHydration(value);
     });
@@ -363,8 +369,14 @@ function App() {
       });
       const combined = append ? [...rawHits, ...answer.hits] : answer.hits;
       if (append) {
+        const scroller = resultsRef.current?.querySelector('[role="group"][aria-labelledby="caption"]');
+        const previousScrollTop = scroller?.scrollTop;
         skipNextFrame.current = true;
         data.append(answer.hits);
+        if (previousScrollTop > 0) requestAnimationFrame(() => {
+          const currentScroller = resultsRef.current?.querySelector('[role="group"][aria-labelledby="caption"]');
+          if (currentScroller) currentScroller.scrollTop = previousScrollTop;
+        });
       }
       setRawHits(combined);
       setLastWasAll(request.searchAll);
@@ -383,52 +395,13 @@ function App() {
     }
   }, [busy, cursor, data, deduplicate, query, rawHits, searchAll, yearFrom, yearTo]);
 
-  const prepareAnalysisRows = useCallback(async (report) => {
+  const prepareAnalysisRows = useCallback(async (port, report) => {
     const request = activeSearch.current;
     if (!request?.query) throw new Error("Run a search before preparing analysis.");
-    let hits = rawHits;
-    let searchRequests = 0;
-    let searchBytes = 0;
-    if (!lastWasAll) {
-      report("Completing the exhaustive exact search…");
-      const answer = await search.search(request.query, {
-        limit: null,
-        exhaustive: true,
-        includeMetadata: false,
-        verificationBatchSize,
-        yearFrom: request.yearFrom,
-        yearTo: request.yearTo,
-        onProgress: (progress) => {
-          if (progress.phase === "candidates") {
-            report(`${progress.candidateCount.toLocaleString()} bitmap candidates selected…`);
-          } else if (progress.requiresPhraseVerification) {
-            report(`Verifying exact phrases · ${progress.processedCandidates.toLocaleString()} / ${progress.candidateCount.toLocaleString()} candidates · ${progress.hits.toLocaleString()} matches`);
-          }
-        },
-      });
-      hits = answer.hits;
-      searchRequests = answer.networkRequests;
-      searchBytes = answer.networkBytes;
-    }
-    const selected = deduplicate ? uniqueById(hits) : hits;
-    if (!selected.length) throw new Error("The exact result set is empty.");
-    report(`Fetching all 14 source columns for ${selected.length.toLocaleString()} exact rows…`);
-    const source = await search.getSourceRows(selected, { columns: COLUMNS });
-    const rows = source.rows.map((row, index) => ({
-      _search_rank: index + 1,
-      _search_year: selected[index].year ?? null,
-      _search_shard: selected[index].shard,
-      _search_doc_id: selected[index].docId,
-      _search_external_id: selected[index].id,
-      ...row,
-    }));
-    return {
-      rows,
-      sourceMatchCount: hits.length,
-      duplicatesRemoved: hits.length - selected.length,
-      networkRequests: searchRequests + source.networkRequests,
-      networkBytes: searchBytes + source.networkBytes,
-    };
+    return search.prepareRowsToPort({
+      hits: rawHits, request, lastWasAll, deduplicate,
+      columns: COLUMNS, verificationBatchSize,
+    }, port, (progress) => report(progress.message));
   }, [deduplicate, lastWasAll, rawHits]);
 
   React.useEffect(() => {
@@ -459,9 +432,11 @@ function App() {
     return value;
   }, []);
 
-  const hydrationLabel = useMemo(() => hydration.loaded
-    ? `Visible source rows: ${hydration.requests} requests / ${(hydration.bytes / 1e6).toFixed(2)} MB, cached in this tab.`
-    : "Full columns are fetched from source Parquet only for rows in view.", [hydration]);
+  const hydrationLabel = useMemo(() => hydration.loading
+    ? "Loading visible source columns in the background…"
+    : hydration.loaded
+      ? `Visible source rows: ${hydration.requests} requests / ${(hydration.bytes / 1e6).toFixed(2)} MB, cached in this tab.`
+      : "Full columns are fetched from source Parquet only for rows in view.", [hydration]);
   const canLoadMore = cursor && !searchAll && signature === `${activeSearch.current?.query}\u0000${activeSearch.current?.yearFrom}\u0000${activeSearch.current?.yearTo}\u0000${activeSearch.current?.searchAll}`;
 
   React.useEffect(() => {
@@ -533,8 +508,9 @@ function App() {
       </form>
 
       <div className="mt-4 min-h-10 text-sm" aria-live="polite">
+        {busy && <span className="mr-2 inline-block size-3 animate-spin rounded-full border-2 border-stone-300 border-t-green-800 align-[-1px]" aria-hidden="true" />}
         <strong id="status" className="font-medium text-stone-900">{status}</strong>
-        <span id="hydration-status" className="ml-3 text-stone-500">{hydrationLabel}</span>
+        <span id="hydration-status" className="ml-3 text-stone-500">{hydration.loading && <span className="mr-1.5 inline-block size-3 animate-spin rounded-full border-2 border-stone-300 border-t-green-800 align-[-1px]" aria-hidden="true" />}{hydrationLabel}</span>
       </div>
 
       {failure && <div className="my-3 flex items-start justify-between gap-5 border-l-2 border-red-700 bg-red-50 px-4 py-3 text-sm text-red-950" role="alert">
