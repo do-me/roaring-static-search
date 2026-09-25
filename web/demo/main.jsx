@@ -5,6 +5,7 @@ import "hightable/src/HighTable.css";
 import "./style.css";
 
 import { StaticSearch } from "../src/index.js";
+import { decodeSql, encodeSql } from "../src/sql_url.js";
 import AnalysisPanel, { DEFAULT_SQL } from "./AnalysisPanel.jsx";
 
 const COLUMNS = [
@@ -25,6 +26,8 @@ const DEFAULT_QUERY = 'copernicus AND (climate OR "greenhouse gas")';
 const DEFAULT_YEAR_FROM = 2015;
 
 const params = new URLSearchParams(location.search);
+const savedSqlFragment = new URLSearchParams(location.hash.slice(1)).get("sqlz");
+const legacySql = params.get("sql");
 function integerParam(name, fallback) {
   if (!params.has(name)) return fallback;
   const raw = params.get(name);
@@ -232,7 +235,11 @@ function App() {
   const [bounds, setBounds] = useState({ min: 1973, max: THIS_YEAR });
   const [searchAll, setSearchAll] = useState(() => booleanParam("all", false));
   const [deduplicate, setDeduplicate] = useState(() => booleanParam("dedupe", true));
-  const [sql, setSql] = useState(() => params.get("sql") ?? DEFAULT_SQL);
+  const [sql, setSql] = useState(() => savedSqlFragment ? DEFAULT_SQL : legacySql ?? DEFAULT_SQL);
+  const [sqlUrlReady, setSqlUrlReady] = useState(!savedSqlFragment);
+  const [sqlUrlState, setSqlUrlState] = useState(() => savedSqlFragment || (legacySql && legacySql !== DEFAULT_SQL)
+    ? null : { sql: DEFAULT_SQL, encoded: null });
+  const [sqlUrlError, setSqlUrlError] = useState(null);
   const [status, setStatus] = useState("Loading index manifest…");
   const [failure, setFailure] = useState(null);
   const [cursor, setCursor] = useState(null);
@@ -270,16 +277,57 @@ function App() {
   }, [displayHits, newFrame]);
 
   React.useEffect(() => {
+    if (!savedSqlFragment) return;
+    let active = true;
+    decodeSql(savedSqlFragment).then((restored) => {
+      if (!active) return;
+      setSql(restored);
+      setSqlUrlState({ sql: restored, encoded: restored === DEFAULT_SQL ? null : savedSqlFragment });
+      setSqlUrlReady(true);
+    }).catch((error) => {
+      if (!active) return;
+      setSql(legacySql ?? DEFAULT_SQL);
+      setSqlUrlReady(true);
+      setSqlUrlError(`Could not restore the saved SQL: ${error.message}`);
+    });
+    return () => { active = false; };
+  }, []);
+
+  React.useEffect(() => {
+    if (!sqlUrlReady || sqlUrlState?.sql === sql) return;
+    let active = true;
+    const timer = setTimeout(() => {
+      if (sql === DEFAULT_SQL) {
+        setSqlUrlState({ sql, encoded: null });
+        setSqlUrlError(null);
+        return;
+      }
+      encodeSql(sql).then((encoded) => {
+        if (!active) return;
+        setSqlUrlState({ sql, encoded });
+        setSqlUrlError(null);
+      }).catch((error) => {
+        if (active) setSqlUrlError(`Could not save SQL in the URL: ${error.message}`);
+      });
+    }, 180);
+    return () => { active = false; clearTimeout(timer); };
+  }, [sql, sqlUrlReady, sqlUrlState]);
+
+  React.useEffect(() => {
+    if (!sqlUrlReady || sqlUrlState?.sql !== sql) return;
     const url = new URL(location.href);
     url.searchParams.set("q", query);
     url.searchParams.set("from", String(yearFrom));
     url.searchParams.set("to", String(yearTo));
     url.searchParams.set("all", searchAll ? "1" : "0");
     url.searchParams.set("dedupe", deduplicate ? "1" : "0");
-    if (sql === DEFAULT_SQL) url.searchParams.delete("sql");
-    else url.searchParams.set("sql", sql);
-    history.replaceState(history.state, "", url);
-  }, [deduplicate, query, searchAll, sql, yearFrom, yearTo]);
+    url.searchParams.delete("sql");
+    const hashParams = new URLSearchParams(url.hash.slice(1));
+    if (sqlUrlState.encoded) hashParams.set("sqlz", sqlUrlState.encoded);
+    else hashParams.delete("sqlz");
+    url.hash = hashParams.toString();
+    if (url.href !== location.href) history.replaceState(history.state, "", url);
+  }, [deduplicate, query, searchAll, sql, sqlUrlReady, sqlUrlState, yearFrom, yearTo]);
 
   const signature = `${query.trim()}\u0000${yearFrom}\u0000${yearTo}\u0000${searchAll}`;
   const run = useCallback(async (append = false) => {
@@ -493,6 +541,8 @@ function App() {
         <div><strong className="font-semibold">Could not complete the request.</strong><p className="mt-1">{failure.message}</p></div>
         {failure.retryable && <button type="button" disabled={busy} onClick={() => run(false)} className="shrink-0 border border-red-800 px-3 py-1.5 text-xs font-semibold hover:bg-red-100 disabled:opacity-50">Retry</button>}
       </div>}
+
+      {sqlUrlError && <div className="my-3 border-l-2 border-red-700 bg-red-50 px-4 py-3 text-sm text-red-950" role="alert">{sqlUrlError}</div>}
 
       {lastWasAll && <div className="mt-5"><Timeline hits={displayHits} /></div>}
 

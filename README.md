@@ -6,7 +6,7 @@ The [EUR-LEX search page](https://do-me.github.io/roaring-static-search/) is dep
 
 After a search, the page can complete the exhaustive exact result set, hydrate every source column, and create a private DuckDB-Wasm table named `search_results`. SQL previews, configurable X/Y bar charts, and full-query Parquet, CSV, and Excel exports run in the browser. Each SQL output row becomes one bar; use `GROUP BY` and `ORDER BY` in SQL for aggregation and order. Charts rerun the query with a 500-row safety limit, independent of the 200-row preview and unlimited exports. DuckDB is lazy-loaded only when the analysis workspace is requested; very broad result sets remain subject to browser memory limits.
 
-The demo keeps its query, inclusive year bounds, search-all and deduplication choices, and any edited SQL in the URL (`q`, `from`, `to`, `all`, `dedupe`, and `sql`). Reloading or sharing that URL restores the controls without automatically rerunning a potentially expensive search. Light, dark, and automatic colour preferences are kept locally in the browser.
+The demo keeps its query, inclusive year bounds, search-all and deduplication choices in URL parameters (`q`, `from`, `to`, `all`, `dedupe`). Edited SQL is gzip-compressed and saved as URL-safe Base64 in the `#sqlz=` fragment, which is not sent to the web server; older `?sql=` links are read and migrated. Reloading or sharing the URL restores the controls without automatically rerunning a potentially expensive search. Light, dark, and automatic colour preferences are kept locally in the browser.
 
 ## Build an index
 

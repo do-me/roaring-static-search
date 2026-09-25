@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 import { startDemoServer } from "../demo/server.js";
+import { decodeSql } from "../src/sql_url.js";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const dataDir = await mkdtemp(path.join(os.tmpdir(), "roaring-static-browser-"));
@@ -66,7 +67,8 @@ try {
   try { await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("rows loaded"), null, { timeout: 20000 }); }
   catch (error) { throw new Error(`${error.message}; analysis=${await page.locator("#analysis-status").textContent()}; alerts=${JSON.stringify(await page.getByRole("alert").allTextContents())}; errors=${JSON.stringify(errors)}`); }
   await page.locator("#sql").fill("SELECT celex, title FROM search_results ORDER BY celex");
-  await page.waitForFunction(() => new URL(location.href).searchParams.get("sql") === "SELECT celex, title FROM search_results ORDER BY celex");
+  await page.waitForFunction(() => new URLSearchParams(location.hash.slice(1)).has("sqlz") && !new URL(location.href).searchParams.has("sql"));
+  assert.equal(await decodeSql(await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get("sqlz"))), "SELECT celex, title FROM search_results ORDER BY celex");
   await page.locator("#run-sql").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 preview rows"));
   assert.deepEqual(await page.locator('[aria-labelledby="analysis-title"] tbody td:first-child').allTextContents(), ["A", "H"]);
@@ -122,6 +124,18 @@ try {
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("200 preview rows"));
   await page.locator("#create-sql-chart").click();
   await page.getByRole("alert").filter({ hasText: "more than 500 rows" }).waitFor();
+  const longSql = `SELECT count(*) AS documents FROM search_results /* ${"Copernicus climate atmosphere greenhouse gas ".repeat(450)} */`;
+  const previousHash = await page.evaluate(() => location.hash);
+  await page.locator("#sql").fill(longSql);
+  await page.waitForFunction((previous) => location.hash !== previous && location.hash.length > 100 && location.href.length < 8000 && !new URL(location.href).searchParams.has("sql"), previousHash);
+  assert.equal(await decodeSql(await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get("sqlz"))), longSql);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector("#status")?.textContent === "Ready");
+  await page.locator("#search-form button").click();
+  await page.waitForFunction(() => document.querySelector("#status")?.textContent.includes("2 shown"));
+  await page.locator("#prepare-analysis").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("rows loaded"));
+  assert.equal(await page.locator("#sql").inputValue(), longSql);
   await page.locator("#query").fill('"greenhouse gas"');
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("3 shown"));
@@ -142,8 +156,9 @@ try {
     const state = new URL(location.href).searchParams;
     return state.get("q") === "climate" && state.get("from") === "2026" && state.get("to") === "2026"
       && state.get("all") === "1" && state.get("dedupe") === "0"
-      && state.get("sql") === "SELECT range AS year, range AS documents FROM range(0, 501)";
+      && !state.has("sql") && new URLSearchParams(location.hash.slice(1)).has("sqlz");
   });
+  assert.equal(await decodeSql(await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get("sqlz"))), longSql);
   await page.reload();
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
   assert.equal(await page.locator("#query").inputValue(), "climate");
@@ -151,6 +166,9 @@ try {
   assert.equal(await page.locator("#year-to").inputValue(), "2026");
   assert.equal(await page.locator("#scope-all").isChecked(), true);
   assert.equal(await page.locator("#deduplicate").isChecked(), false);
+  await page.goto(`http://127.0.0.1:${server.address().port}/?sql=${encodeURIComponent("SELECT 1 AS x")}`);
+  await page.waitForFunction(() => new URLSearchParams(location.hash.slice(1)).has("sqlz") && !new URL(location.href).searchParams.has("sql"));
+  assert.equal(await decodeSql(await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get("sqlz"))), "SELECT 1 AS x");
   await page.goto(`http://127.0.0.1:${server.address().port}/?manifest=/data/pagination/manifest.json`);
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
   await page.locator("#query").fill("pagination");
@@ -176,7 +194,7 @@ try {
   assert.match(await page.getByRole("alert").textContent(), /HTTP 404/);
   assert.equal(await page.getByRole("button", { name: "Retry" }).isVisible(), true);
   assert.deepEqual(errors.filter((message) => !message.includes("/data/missing.json") && !message.match(/duckdb-(?:eh|mvp).*\.wasm: net::ERR_ABORTED/)), []);
-  console.log("Chrome browser smoke test passed: themes, search modes, automatic pagination, URL state, valid SQL exports, configurable SQL chart and limit, timeline labels, errors, and Parquet hydration");
+  console.log("Chrome browser smoke test passed: themes, search modes, automatic pagination, compressed SQL URL migration and reload, valid SQL exports, configurable SQL chart and limit, timeline labels, errors, and Parquet hydration");
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));
