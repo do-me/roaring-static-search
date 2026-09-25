@@ -36,9 +36,11 @@ button { cursor: pointer; }
 [data-theme="dark"] .border-red-800 { border-color: #ef4444; }
 [data-theme="dark"] .theme-switch button[aria-pressed="true"] { background: #166534; color: #fff; }
 [data-theme="dark"] input,
-[data-theme="dark"] textarea { caret-color: #fafaf9; }
-[data-theme="dark"] section[aria-labelledby="timeline-title"] line { stroke: #57534e; }
-[data-theme="dark"] section[aria-labelledby="timeline-title"] text { fill: #d6d3d1; }
+[data-theme="dark"] textarea,
+[data-theme="dark"] select { caret-color: #fafaf9; }
+[data-theme="dark"] .bar-chart line { stroke: #57534e; }
+[data-theme="dark"] .bar-chart text { fill: #d6d3d1; }
+[data-theme="dark"] .bar-chart rect { fill: #22c55e; }
 [data-theme="dark"] [aria-labelledby="analysis-title"] tbody tr { background: #1c1917; color: #fafaf9; }
 [data-theme="dark"] .table-shell > div {
   --hy-color-1: #fafaf9;

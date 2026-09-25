@@ -70,6 +70,8 @@ try {
   await page.locator("#run-sql").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 preview rows"));
   assert.deepEqual(await page.locator('[aria-labelledby="analysis-title"] tbody td:first-child').allTextContents(), ["A", "H"]);
+  assert.equal(await page.locator("#sql-chart-title").textContent(), "Chart this SQL output");
+  assert.equal(await page.locator("#create-sql-chart").count(), 0);
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download CSV" }).click();
   const download = await downloadPromise;
@@ -93,6 +95,33 @@ try {
   const excelBytes = await readFile(excelPath);
   assert.equal(excelBytes.subarray(0, 2).toString(), "PK");
   execFileSync("unzip", ["-t", excelPath], { stdio: "ignore" });
+  await page.locator("#sql").fill("SELECT celex AS label, _search_rank AS rank, length(text) AS chars FROM search_results ORDER BY rank");
+  assert.equal(await page.locator("#sql-chart-title").count(), 0);
+  await page.locator("#run-sql").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 preview rows"));
+  assert.equal(await page.locator("#chart-x").inputValue(), "label");
+  await page.locator("#chart-y").selectOption("chars");
+  await page.locator("#create-sql-chart").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 bars"));
+  assert.equal(await page.locator('[aria-labelledby="sql-chart-title"] svg rect').count(), 2);
+  const chartTitles = await page.locator('[aria-labelledby="sql-chart-title"] svg rect title').allTextContents();
+  assert.match(chartTitles[0], /^A: \d+$/);
+  assert.match(chartTitles[1], /^H: \d+$/);
+  assert.equal(await page.locator("#chart-values").isChecked(), true);
+  await page.locator("#chart-values").uncheck();
+  await page.locator("#sql").fill("SELECT range AS year, range AS documents FROM range(0, 250)");
+  await page.locator("#run-sql").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("200 preview rows"));
+  assert.equal(await page.locator("#chart-x").inputValue(), "year");
+  assert.equal(await page.locator("#chart-y").inputValue(), "documents");
+  await page.locator("#create-sql-chart").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("250 bars"));
+  assert.equal(await page.locator('[aria-labelledby="sql-chart-title"] svg rect').count(), 250);
+  await page.locator("#sql").fill("SELECT range AS year, range AS documents FROM range(0, 501)");
+  await page.locator("#run-sql").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("200 preview rows"));
+  await page.locator("#create-sql-chart").click();
+  await page.getByRole("alert").filter({ hasText: "more than 500 rows" }).waitFor();
   await page.locator("#query").fill('"greenhouse gas"');
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.startsWith("3 shown"));
@@ -105,6 +134,7 @@ try {
   await page.locator("#search-form button").click();
   await page.waitForFunction(() => document.querySelector("#status").textContent.includes("2 shown"));
   assert.equal(await page.locator("#timeline-title").textContent(), "Matches by year");
+  assert.deepEqual(await page.locator('[aria-labelledby="timeline-title"] .bar-value').allTextContents(), ["2"]);
   await page.waitForFunction(() => [...document.querySelectorAll('#results td[aria-colindex="3"]')].map((cell) => cell.textContent).join(",") === "G,H");
   assert.deepEqual(await page.locator('#results td[aria-colindex="3"]').allTextContents(), ["G", "H"]);
   await page.locator("#deduplicate").uncheck();
@@ -112,7 +142,7 @@ try {
     const state = new URL(location.href).searchParams;
     return state.get("q") === "climate" && state.get("from") === "2026" && state.get("to") === "2026"
       && state.get("all") === "1" && state.get("dedupe") === "0"
-      && state.get("sql") === "SELECT celex, title FROM search_results ORDER BY celex";
+      && state.get("sql") === "SELECT range AS year, range AS documents FROM range(0, 501)";
   });
   await page.reload();
   await page.waitForFunction(() => document.querySelector("#status").textContent === "Ready");
@@ -146,7 +176,7 @@ try {
   assert.match(await page.getByRole("alert").textContent(), /HTTP 404/);
   assert.equal(await page.getByRole("button", { name: "Retry" }).isVisible(), true);
   assert.deepEqual(errors.filter((message) => !message.includes("/data/missing.json") && !message.match(/duckdb-(?:eh|mvp).*\.wasm: net::ERR_ABORTED/)), []);
-  console.log("Chrome browser smoke test passed: themes, search modes, automatic pagination, URL state, valid SQL exports, chart, errors, and Parquet hydration");
+  console.log("Chrome browser smoke test passed: themes, search modes, automatic pagination, URL state, valid SQL exports, configurable SQL chart and limit, timeline labels, errors, and Parquet hydration");
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));

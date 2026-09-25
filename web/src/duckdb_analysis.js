@@ -3,6 +3,7 @@ import ehWasm from "@duckdb/duckdb-wasm/dist/duckdb-eh.wasm?url";
 import ehWorker from "@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url";
 import mvpWasm from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
 import mvpWorker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
+import { CHART_ROW_LIMIT } from "./chart_data.js";
 
 const BUNDLES = {
   mvp: { mainModule: mvpWasm, mainWorker: mvpWorker },
@@ -71,6 +72,18 @@ export class BrowserAnalysis {
     const columns = table.schema.fields.map((field) => field.name);
     const rows = table.toArray().map((row) => jsValue(row));
     return { columns, rows, shown: rows.length };
+  }
+
+  async chartRows(sql) {
+    const expression = queryExpression(sql);
+    const table = await this.connection.query(`SELECT * FROM (${expression}) AS __chart LIMIT ${CHART_ROW_LIMIT + 1}`);
+    if (table.numRows > CHART_ROW_LIMIT) {
+      throw new Error(`The SQL output has more than ${CHART_ROW_LIMIT} rows. Add GROUP BY, a filter, or LIMIT before making a bar chart; downloads still use the full query.`);
+    }
+    return {
+      columns: table.schema.fields.map((field) => field.name),
+      rows: table.toArray().map((row) => jsValue(row)),
+    };
   }
 
   async export(sql, format) {

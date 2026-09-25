@@ -132,9 +132,9 @@ function Timeline({ hits }) {
     return [...values].sort(([a], [b]) => a - b);
   }, [hits]);
   if (!counts.length) return null;
-  const width = Math.max(720, counts.length * 45);
+  const width = Math.max(720, counts.length * 54);
   const height = 250;
-  const pad = { left: 54, right: 18, top: 18, bottom: 44 };
+  const pad = { left: 54, right: 18, top: 32, bottom: 44 };
   const chartHeight = height - pad.top - pad.bottom;
   const chartWidth = width - pad.left - pad.right;
   const maximum = Math.max(...counts.map(([, count]) => count));
@@ -151,7 +151,7 @@ function Timeline({ hits }) {
       <span className="font-mono text-xs tabular-nums text-stone-500">{hits.length.toLocaleString()} documents</span>
     </div>
     <div className="overflow-x-auto" role="img" aria-label={`Bar chart of document counts for ${counts.length} years`}>
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-64 min-w-[720px] w-full" aria-hidden="true">
+      <svg viewBox={`0 0 ${width} ${height}`} width={width} height={height} className="bar-chart max-w-none" aria-hidden="true">
         {ticks.map((tick) => {
           const y = pad.top + chartHeight - (tick / maximum) * chartHeight;
           return <g key={tick}>
@@ -162,11 +162,13 @@ function Timeline({ hits }) {
         {counts.map(([year, count], index) => {
           const x = pad.left + index * (chartWidth / counts.length) + gap / 2;
           const barHeight = (count / maximum) * chartHeight;
+          const barTop = pad.top + chartHeight - barHeight;
           const showLabel = index % labelEvery === 0 || index === counts.length - 1;
           return <g key={year}>
-            <rect x={x} y={pad.top + chartHeight - barHeight} width={barWidth} height={barHeight} fill="#166534">
+            <rect x={x} y={barTop} width={barWidth} height={barHeight} fill="#166534">
               <title>{year}: {count.toLocaleString()} documents</title>
             </rect>
+            <text className="bar-value" x={x + barWidth / 2} y={Math.max(13, barTop - 7)} textAnchor="middle" fill="#57534e" fontSize="10">{count.toLocaleString()}</text>
             {showLabel && <text x={x + barWidth / 2} y={height - 17} textAnchor="middle" fill="#57534e" fontSize="11">{year}</text>}
           </g>;
         })}

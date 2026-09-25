@@ -1,4 +1,6 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { barsFromRows, CHART_ROW_LIMIT, numericColumns, ROW_NUMBER, suggestChartAxes } from "../src/chart_data.js";
+import SqlBarChart from "./SqlBarChart.jsx";
 
 export const DEFAULT_SQL = `SELECT
   date_part('year', CAST(date AS DATE)) AS year,
@@ -29,8 +31,14 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
   const [ready, setReady] = useState(null);
   const [status, setStatus] = useState("Load the complete exact result set into DuckDB when you are ready to analyse it.");
   const [result, setResult] = useState(null);
+  const [xAxis, setXAxis] = useState(ROW_NUMBER);
+  const [yAxis, setYAxis] = useState("");
+  const [chart, setChart] = useState(null);
+  const [chartFailure, setChartFailure] = useState(null);
+  const [showValues, setShowValues] = useState(true);
   const [failure, setFailure] = useState(null);
   const [busy, setBusy] = useState(false);
+  const numeric = useMemo(() => result ? numericColumns(result.columns, result.rows) : [], [result]);
 
   useEffect(() => {
     activeEpoch.current = epoch;
@@ -39,12 +47,30 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     current?.close();
     setReady(null);
     setResult(null);
+    setChart(null);
+    setChartFailure(null);
     setFailure(null);
     setBusy(false);
     setStatus("Load the complete exact result set into DuckDB when you are ready to analyse it.");
   }, [epoch]);
 
   useEffect(() => () => { engine.current?.close(); }, []);
+
+  function showPreview(value, query) {
+    setResult({ ...value, sql: query });
+    const axes = suggestChartAxes(value.columns, value.rows);
+    setXAxis(axes.x);
+    setYAxis(axes.y);
+    setChart(null);
+    setChartFailure(null);
+  }
+
+  function editSql(value) {
+    onSqlChange(value);
+    setResult(null);
+    setChart(null);
+    setChartFailure(null);
+  }
 
   async function prepare() {
     if (busy) return;
@@ -64,7 +90,7 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
       setReady(payload);
       const duplicateNote = payload.duplicatesRemoved ? ` · ${payload.duplicatesRemoved.toLocaleString()} duplicate IDs removed` : "";
       setStatus(`${payload.rows.length.toLocaleString()} exact rows loaded${duplicateNote} · ${payload.networkRequests} new source requests / ${(payload.networkBytes / 1e6).toFixed(2)} MB · data stays in this tab`);
-      setResult(await engine.current.preview(sql));
+      showPreview(await engine.current.preview(sql), sql);
     } catch (error) {
       setFailure(error.message || "Could not prepare the analysis database.");
       setStatus("Analysis unavailable");
@@ -80,11 +106,33 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     setStatus("Running SQL in DuckDB-Wasm…");
     try {
       const value = await engine.current.preview(sql);
-      setResult(value);
+      showPreview(value, sql);
       setStatus(`${value.shown.toLocaleString()} preview rows · preview capped at 200; downloads run the complete query`);
     } catch (error) {
       setFailure(error.message || "The SQL query failed.");
       setStatus("SQL query failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createChart() {
+    if (!engine.current || !result || busy) return;
+    setBusy(true);
+    setChartFailure(null);
+    setStatus("Reading the complete SQL output for the bar chart…");
+    const requestedEpoch = epoch;
+    try {
+      const output = await engine.current.chartRows(result.sql);
+      if (activeEpoch.current !== requestedEpoch) return;
+      const { bars, skipped } = barsFromRows(output.rows, xAxis, yAxis);
+      setChart({ bars, skipped, x: xAxis, y: yAxis, outputRows: output.rows.length });
+      setShowValues(bars.length <= 60);
+      setStatus(`Bar chart ready · ${bars.length.toLocaleString()} bars${skipped ? ` · ${skipped.toLocaleString()} rows with null Y skipped` : ""}`);
+    } catch (error) {
+      setChart(null);
+      setChartFailure(error.message || "Could not create the bar chart.");
+      setStatus("Bar chart unavailable");
     } finally {
       setBusy(false);
     }
@@ -123,7 +171,7 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     {ready && <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(380px,0.85fr)_minmax(0,1.15fr)]">
       <div>
         <label htmlFor="sql" className="mb-2 block text-xs font-semibold uppercase tracking-wider text-stone-600">SQL query</label>
-        <textarea id="sql" value={sql} onChange={(event) => onSqlChange(event.target.value)} spellCheck="false" className="h-56 w-full resize-y border border-stone-400 bg-white p-4 font-mono text-xs leading-5 outline-none focus:border-green-800 focus:ring-2 focus:ring-green-800/15" />
+        <textarea id="sql" value={sql} onChange={(event) => editSql(event.target.value)} spellCheck="false" className="h-56 w-full resize-y border border-stone-400 bg-white p-4 font-mono text-xs leading-5 outline-none focus:border-green-800 focus:ring-2 focus:ring-green-800/15" />
         <div className="mt-3 flex flex-wrap gap-2">
           <button id="run-sql" type="button" disabled={busy} onClick={runSql} className="border border-stone-950 bg-stone-950 px-4 py-2 text-xs font-semibold text-white hover:bg-green-900 disabled:opacity-50">Run preview</button>
           {[["parquet", "Parquet"], ["csv", "CSV"], ["xlsx", "Excel"]].map(([format, label]) => <button key={format} type="button" disabled={busy} onClick={() => exportResult(format)} className="border border-stone-400 bg-white px-4 py-2 text-xs font-semibold hover:border-green-800 hover:text-green-800 disabled:opacity-50">Download {label}</button>)}
@@ -144,5 +192,38 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
         </div>
       </div>
     </div>}
+
+    {ready && result && <section className="mt-6 border-t border-stone-300 pt-5" aria-labelledby="sql-chart-title">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-3xl">
+          <h3 id="sql-chart-title" className="text-sm font-semibold text-stone-950">Chart this SQL output</h3>
+          <p className="mt-1 text-xs leading-5 text-stone-600">Each output row becomes one bar. X supplies its label; numeric Y sets its height. Use <code className="font-mono">GROUP BY</code> for totals and <code className="font-mono">ORDER BY</code> for bar order—the chart does not aggregate or sort for you.</p>
+        </div>
+        <span className="font-mono text-[11px] text-stone-500">Preview: {result.shown.toLocaleString()} rows · chart: up to {CHART_ROW_LIMIT.toLocaleString()}</span>
+      </div>
+      {numeric.length ? <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label htmlFor="chart-x" className="text-xs font-medium text-stone-600">X-axis · label
+          <select id="chart-x" value={xAxis} onChange={(event) => { setXAxis(event.target.value); setChart(null); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+            <option value={ROW_NUMBER}>Row number</option>
+            {result.columns.map((column) => <option key={column} value={column}>{column}</option>)}
+          </select>
+        </label>
+        <label htmlFor="chart-y" className="text-xs font-medium text-stone-600">Y-axis · numeric value
+          <select id="chart-y" value={yAxis} onChange={(event) => { setYAxis(event.target.value); setChart(null); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+            {numeric.map((column) => <option key={column} value={column}>{column}</option>)}
+          </select>
+        </label>
+        <button id="create-sql-chart" type="button" disabled={busy || !yAxis} onClick={createChart} className="border border-stone-950 bg-stone-950 px-4 py-2 text-xs font-semibold text-white hover:bg-green-900 disabled:opacity-50">{busy ? "Building…" : chart ? "Update chart" : "Create bar chart"}</button>
+      </div> : <p className="mt-3 text-xs leading-5 text-stone-500">A bar chart needs a numeric output column. Try <code className="font-mono">SELECT date_part('year', CAST(date AS DATE)) AS year, count(*) AS documents FROM search_results GROUP BY year ORDER BY year</code>.</p>}
+      <p className="mt-3 text-xs leading-5 text-stone-500">Creating a chart reruns this SQL for up to {CHART_ROW_LIMIT.toLocaleString()} output rows, beyond the 200-row preview. For larger outputs, aggregate or limit in SQL; downloads still run the full query.</p>
+      {chartFailure && <p className="mt-3 border-l-2 border-red-700 bg-red-50 px-4 py-2 text-xs text-red-950" role="alert">{chartFailure}</p>}
+      {chart && <div className="mt-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-stone-600">{chart.bars.length.toLocaleString()} bars · X: <strong>{chart.x === ROW_NUMBER ? "row number" : chart.x}</strong> · Y: <strong>{chart.y}</strong>{chart.skipped ? ` · ${chart.skipped} null Y values skipped` : ""}</p>
+          <label htmlFor="chart-values" className="inline-flex items-center gap-2 text-xs text-stone-600"><input id="chart-values" type="checkbox" checked={showValues} onChange={(event) => setShowValues(event.target.checked)} className="size-4 accent-green-800" />Show values on bars</label>
+        </div>
+        <SqlBarChart bars={chart.bars} xLabel={chart.x === ROW_NUMBER ? "Row number" : chart.x} yLabel={chart.y} showValues={showValues} />
+      </div>}
+    </section>}
   </section>;
 }
