@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { barsFromRows, numericColumns, numericValue, ROW_NUMBER, suggestChartAxes } from "../src/chart_data.js";
+import { barsFromRows, numericColumns, numericValue, ROW_NUMBER, stackedBarsFromRows, suggestChartAxes, suggestSeriesColumn } from "../src/chart_data.js";
 
 test("SQL chart suggests year and count, while accepting decimal measures", () => {
   const rows = [{ year: 2024, documents: 3, share: "0.25" }, { year: 2025, documents: 7, share: "-1.5" }];
@@ -32,4 +32,36 @@ test("SQL chart rejects non-numeric measures rather than silently plotting wrong
   assert.deepEqual(numericColumns(["label", "value"], [{ label: "A", value: "not a number" }]), []);
   assert.throws(() => barsFromRows([{ label: "A", value: "abc" }], "label", "value"), /non-numeric value at row 1/);
   assert.throws(() => barsFromRows([{ label: "A", value: null }], "label", "value"), /no numeric values/);
+});
+
+test("stacked chart groups years and document types, summing repeated pairs", () => {
+  const rows = [
+    { year: 2020, document_type: "decision", document_count: 2 },
+    { year: 2020, document_type: "regulation", document_count: 3 },
+    { year: 2020, document_type: "decision", document_count: 1 },
+    { year: 2021, document_type: "decision", document_count: 4 },
+    { year: 2021, document_type: "regulation", document_count: null },
+  ];
+  assert.deepEqual(suggestChartAxes(["year", "document_type", "document_count"], rows), { x: "year", y: "document_count" });
+  assert.equal(suggestSeriesColumn(["year", "document_type", "document_count"], rows, "year", "document_count"), "document_type");
+  assert.deepEqual(stackedBarsFromRows(rows, "year", "document_count", "document_type"), {
+    bars: [
+      { label: "2020", segments: [{ series: "decision", value: 3 }, { series: "regulation", value: 3 }], total: 6, positive: 6, negative: 0 },
+      { label: "2021", segments: [{ series: "decision", value: 4 }], total: 4, positive: 4, negative: 0 },
+    ],
+    series: ["decision", "regulation"],
+    skipped: 1,
+  });
+});
+
+test("stacked chart separates positive and negative stacks and validates axes", () => {
+  const output = stackedBarsFromRows([
+    { year: 2020, type: "up", value: 3 },
+    { year: 2020, type: "down", value: -2 },
+  ], "year", "value", "type");
+  assert.deepEqual(output.bars[0], {
+    label: "2020", segments: [{ series: "up", value: 3 }, { series: "down", value: -2 }],
+    total: 1, positive: 3, negative: -2,
+  });
+  assert.throws(() => stackedBarsFromRows([{ year: 2020, value: 1 }], "year", "value", "year"), /different columns/);
 });

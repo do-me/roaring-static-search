@@ -1,5 +1,5 @@
 import { BrowserAnalysis } from "../src/duckdb_analysis.js";
-import { barsFromRows } from "../src/chart_data.js";
+import { barsFromRows, CHART_TYPES, stackedBarsFromRows } from "../src/chart_data.js";
 
 let analysis;
 
@@ -22,7 +22,10 @@ self.onmessage = async ({ data: { id, method, args } }) => {
     } else if (method === "preview") result = await analysis.preview(args[0]);
     else if (method === "chart") {
       const output = await analysis.chartRows(args[0]);
-      result = { ...barsFromRows(output.rows, args[1], args[2]), outputRows: output.rows.length };
+      const chart = args[3] === CHART_TYPES.STACKED
+        ? stackedBarsFromRows(output.rows, args[1], args[2], args[4])
+        : barsFromRows(output.rows, args[1], args[2]);
+      result = { ...chart, outputRows: output.rows.length };
     }
     else if (method === "export") result = await analysis.export(args[0], args[1]);
     else if (method === "close") { await analysis?.close(); analysis = null; result = true; }

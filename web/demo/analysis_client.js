@@ -8,7 +8,7 @@ export class AnalysisClient {
 
   createFromPort(port) { return this.rpc.request("createFromPort", [port], null, [port]); }
   preview(sql) { return this.rpc.request("preview", [sql]); }
-  chart(sql, xAxis, yAxis) { return this.rpc.request("chart", [sql, xAxis, yAxis]); }
+  chart(sql, xAxis, yAxis, type, seriesAxis) { return this.rpc.request("chart", [sql, xAxis, yAxis, type, seriesAxis]); }
   export(sql, format) { return this.rpc.request("export", [sql, format]); }
   close() { this.rpc.stop(); }
 }

@@ -40,7 +40,8 @@ button { cursor: pointer; }
 [data-theme="dark"] select { caret-color: #fafaf9; }
 [data-theme="dark"] .bar-chart line { stroke: #57534e; }
 [data-theme="dark"] .bar-chart text { fill: #d6d3d1; }
-[data-theme="dark"] .bar-chart rect { fill: #22c55e; }
+[data-theme="dark"] .bar-chart rect:not(.stacked-segment) { fill: #22c55e; }
+[data-theme="dark"] .bar-chart .stacked-segment + text { fill: #fff; }
 [data-theme="dark"] [aria-labelledby="analysis-title"] tbody tr { background: #1c1917; color: #fafaf9; }
 [data-theme="dark"] .table-shell > div {
   --hy-color-1: #fafaf9;

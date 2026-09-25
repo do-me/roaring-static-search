@@ -115,6 +115,21 @@ try {
   assert.match(chartTitles[1], /^H: \d+$/);
   assert.equal(await page.locator("#chart-values").isChecked(), true);
   await page.locator("#chart-values").uncheck();
+  await page.locator("#sql").fill("SELECT * FROM (VALUES (2020, 'decision', 2), (2020, 'regulation', 3), (2021, 'decision', 4)) AS t(year, document_type, document_count) ORDER BY year, document_type");
+  await page.locator("#run-sql").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("3 preview rows"));
+  await page.locator("#chart-type").selectOption("stacked");
+  assert.equal(await page.locator("#chart-x").inputValue(), "year");
+  assert.equal(await page.locator("#chart-y").inputValue(), "document_count");
+  assert.equal(await page.locator("#chart-series").inputValue(), "document_type");
+  await page.locator("#create-sql-chart").click();
+  await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("2 bars"));
+  assert.equal(await page.locator('[aria-labelledby="sql-chart-title"] .stacked-segment').count(), 3);
+  assert.deepEqual(await page.locator('[aria-labelledby="sql-chart-title"] .stacked-segment title').allTextContents(), [
+    "2020 · decision: 2", "2020 · regulation: 3", "2021 · decision: 4",
+  ]);
+  assert.match(await page.locator('[aria-labelledby="sql-chart-title"] [aria-label="document_type categories"]').textContent(), /decision.*regulation/);
+  await page.locator("#chart-type").selectOption("bar");
   await page.locator("#sql").fill("SELECT range AS year, range AS documents FROM range(0, 250)");
   await page.locator("#run-sql").click();
   await page.waitForFunction(() => document.querySelector("#analysis-status")?.textContent.includes("200 preview rows"));
@@ -198,7 +213,7 @@ try {
   assert.match(await page.getByRole("alert").textContent(), /HTTP 404/);
   assert.equal(await page.getByRole("button", { name: "Retry" }).isVisible(), true);
   assert.deepEqual(errors.filter((message) => !message.includes("/data/missing.json") && !message.match(/duckdb-(?:eh|mvp).*\.wasm: net::ERR_ABORTED/)), []);
-  console.log("Chrome browser smoke test passed: themes, search modes, automatic pagination, compressed SQL URL migration and reload, valid SQL exports, configurable SQL chart and limit, timeline labels, errors, and Parquet hydration");
+  console.log("Chrome browser smoke test passed: themes, search modes, automatic pagination, compressed SQL URL migration and reload, valid SQL exports, regular and stacked SQL charts and limit, timeline labels, errors, and Parquet hydration");
 } finally {
   await browser?.close();
   if (server) await new Promise((resolve) => server.close(resolve));

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { CHART_ROW_LIMIT, numericColumns, ROW_NUMBER, suggestChartAxes } from "../src/chart_data.js";
+import { CHART_ROW_LIMIT, CHART_TYPES, numericColumns, ROW_NUMBER, suggestChartAxes, suggestSeriesColumn } from "../src/chart_data.js";
 import { AnalysisClient } from "./analysis_client.js";
 import SqlBarChart from "./SqlBarChart.jsx";
 
@@ -37,6 +37,8 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
   const [result, setResult] = useState(null);
   const [xAxis, setXAxis] = useState(ROW_NUMBER);
   const [yAxis, setYAxis] = useState("");
+  const [chartType, setChartType] = useState(CHART_TYPES.BAR);
+  const [seriesAxis, setSeriesAxis] = useState("");
   const [chart, setChart] = useState(null);
   const [chartFailure, setChartFailure] = useState(null);
   const [showValues, setShowValues] = useState(true);
@@ -69,6 +71,7 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     const axes = suggestChartAxes(value.columns, value.rows);
     setXAxis(axes.x);
     setYAxis(axes.y);
+    setSeriesAxis(suggestSeriesColumn(value.columns, value.rows, axes.x, axes.y));
     setChart(null);
     setChartFailure(null);
   }
@@ -151,11 +154,11 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
     const requestedEpoch = epoch;
     const requestedChartRevision = chartRevision.current;
     try {
-      const output = await engine.current.chart(result.sql, xAxis, yAxis);
+      const output = await engine.current.chart(result.sql, xAxis, yAxis, chartType, seriesAxis);
       if (activeEpoch.current !== requestedEpoch || chartRevision.current !== requestedChartRevision) return;
-      setChart({ ...output, x: xAxis, y: yAxis });
+      setChart({ ...output, x: xAxis, y: yAxis, type: chartType, seriesAxis });
       setShowValues(output.bars.length <= 60);
-      setStatus(`Bar chart ready · ${output.bars.length.toLocaleString()} bars${output.skipped ? ` · ${output.skipped.toLocaleString()} rows with null Y skipped` : ""}`);
+      setStatus(`${chartType === CHART_TYPES.STACKED ? "Stacked bar" : "Bar"} chart ready · ${output.bars.length.toLocaleString()} bars${output.skipped ? ` · ${output.skipped.toLocaleString()} rows with null Y skipped` : ""}`);
     } catch (error) {
       if (activeEpoch.current !== requestedEpoch || chartRevision.current !== requestedChartRevision) return;
       setChart(null);
@@ -228,33 +231,45 @@ export default function AnalysisPanel({ epoch, prepareRows, deduplicate, sql, on
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-3xl">
           <h3 id="sql-chart-title" className="text-sm font-semibold text-stone-950">Chart this SQL output</h3>
-          <p className="mt-1 text-xs leading-5 text-stone-600">Each output row becomes one bar. X supplies its label; numeric Y sets its height. Use <code className="font-mono">GROUP BY</code> for totals and <code className="font-mono">ORDER BY</code> for bar order—the chart does not aggregate or sort for you.</p>
+          <p className="mt-1 text-xs leading-5 text-stone-600">Regular bars show one SQL row each. Stacked bars combine rows with the same X label and colour each stack-by value separately. Use <code className="font-mono">ORDER BY</code> in SQL for bar order.</p>
         </div>
         <span className="font-mono text-[11px] text-stone-500">Preview: {result.shown.toLocaleString()} rows · chart: up to {CHART_ROW_LIMIT.toLocaleString()}</span>
       </div>
       {numeric.length ? <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label htmlFor="chart-type" className="text-xs font-medium text-stone-600">Chart type
+          <select id="chart-type" value={chartType} onChange={(event) => { chartRevision.current++; setChartType(event.target.value); setChart(null); setStatus("Chart type changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+            <option value={CHART_TYPES.BAR}>Bar</option>
+            <option value={CHART_TYPES.STACKED}>Stacked bar</option>
+          </select>
+        </label>
         <label htmlFor="chart-x" className="text-xs font-medium text-stone-600">X-axis · label
-          <select id="chart-x" value={xAxis} onChange={(event) => { chartRevision.current++; setXAxis(event.target.value); setChart(null); setStatus("Chart axes changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+          <select id="chart-x" value={xAxis} onChange={(event) => { chartRevision.current++; setXAxis(event.target.value); setSeriesAxis(suggestSeriesColumn(result.columns, result.rows, event.target.value, yAxis)); setChart(null); setStatus("Chart axes changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
             <option value={ROW_NUMBER}>Row number</option>
             {result.columns.map((column) => <option key={column} value={column}>{column}</option>)}
           </select>
         </label>
         <label htmlFor="chart-y" className="text-xs font-medium text-stone-600">Y-axis · numeric value
-          <select id="chart-y" value={yAxis} onChange={(event) => { chartRevision.current++; setYAxis(event.target.value); setChart(null); setStatus("Chart axes changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+          <select id="chart-y" value={yAxis} onChange={(event) => { chartRevision.current++; setYAxis(event.target.value); setSeriesAxis(suggestSeriesColumn(result.columns, result.rows, xAxis, event.target.value)); setChart(null); setStatus("Chart axes changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
             {!yAxis && <option value="">Choose a measure</option>}
             {numeric.map((column) => <option key={column} value={column}>{column}</option>)}
           </select>
         </label>
-        <button id="create-sql-chart" type="button" disabled={busy || !yAxis} onClick={createChart} className="border border-stone-950 bg-stone-950 px-4 py-2 text-xs font-semibold text-white hover:bg-green-900 disabled:opacity-50">{busy ? "Building…" : chart ? "Update chart" : "Create bar chart"}</button>
+        {chartType === CHART_TYPES.STACKED && <label htmlFor="chart-series" className="text-xs font-medium text-stone-600">Stack by · category
+          <select id="chart-series" value={seriesAxis} onChange={(event) => { chartRevision.current++; setSeriesAxis(event.target.value); setChart(null); setStatus("Stack-by column changed · create the chart again."); }} className="mt-1 block min-w-40 border border-stone-400 bg-white px-3 py-2 text-sm text-stone-950 outline-none focus:border-green-800">
+            {!seriesAxis && <option value="">Choose a category</option>}
+            {result.columns.filter((column) => column !== xAxis && column !== yAxis).map((column) => <option key={column} value={column}>{column}</option>)}
+          </select>
+        </label>}
+        <button id="create-sql-chart" type="button" disabled={busy || !yAxis || (chartType === CHART_TYPES.STACKED && !seriesAxis)} onClick={createChart} className="border border-stone-950 bg-stone-950 px-4 py-2 text-xs font-semibold text-white hover:bg-green-900 disabled:opacity-50">{busy ? "Building…" : chart ? "Update chart" : chartType === CHART_TYPES.STACKED ? "Create stacked chart" : "Create bar chart"}</button>
       </div> : <p className="mt-3 text-xs leading-5 text-stone-500">A bar chart needs a numeric output column. Try <code className="font-mono">SELECT date_part('year', CAST(date AS DATE)) AS year, count(*) AS documents FROM search_results GROUP BY year ORDER BY year</code>.</p>}
       <p className="mt-3 text-xs leading-5 text-stone-500">{result.complete ? "The complete SQL output is already cached; charting it does not rerun SQL." : `The preview shows 200 rows. Charting fetches up to ${CHART_ROW_LIMIT.toLocaleString()} rows once; changing chart axes reuses them.`} For larger outputs, aggregate or limit in SQL; downloads still run the full query.</p>
       {chartFailure && <p className="mt-3 border-l-2 border-red-700 bg-red-50 px-4 py-2 text-xs text-red-950" role="alert">{chartFailure}</p>}
       {chart && <div className="mt-5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-xs text-stone-600">{chart.bars.length.toLocaleString()} bars · X: <strong>{chart.x === ROW_NUMBER ? "row number" : chart.x}</strong> · Y: <strong>{chart.y}</strong>{chart.skipped ? ` · ${chart.skipped} null Y values skipped` : ""}</p>
+          <p className="text-xs text-stone-600">{chart.bars.length.toLocaleString()} bars · X: <strong>{chart.x === ROW_NUMBER ? "row number" : chart.x}</strong> · Y: <strong>{chart.y}</strong>{chart.type === CHART_TYPES.STACKED && <> · Stacked by: <strong>{chart.seriesAxis}</strong></>}{chart.skipped ? ` · ${chart.skipped} null Y values skipped` : ""}</p>
           <label htmlFor="chart-values" className="inline-flex items-center gap-2 text-xs text-stone-600"><input id="chart-values" type="checkbox" checked={showValues} onChange={(event) => setShowValues(event.target.checked)} className="size-4 accent-green-800" />Show values on bars</label>
         </div>
-        <SqlBarChart bars={chart.bars} xLabel={chart.x === ROW_NUMBER ? "Row number" : chart.x} yLabel={chart.y} showValues={showValues} />
+        <SqlBarChart bars={chart.bars} xLabel={chart.x === ROW_NUMBER ? "Row number" : chart.x} yLabel={chart.y} showValues={showValues} stacked={chart.type === CHART_TYPES.STACKED} series={chart.series} seriesLabel={chart.seriesAxis} />
       </div>}
     </section>}
   </section>;
